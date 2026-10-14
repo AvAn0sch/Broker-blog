@@ -1,0 +1,13 @@
+allowBuilds:
+  esbuild: true
+storeDir: .local/pnpm-store
+cacheDir: .local/pnpm-cache
+engineStrict: true
+savePrefix: ''
+minimumReleaseAgeExclude:
+  - '@playwright/test@1.64.1'
+  - dotenv@18.0.8
+  - playwright-core@1.64.1
+  - playwright@1.64.1
+  - react-dom@19.3.1
+  - react@19.3.1

@@ -1,0 +1,78 @@
+name: broker-blog-environment
+
+x-app: &app
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+    target: runtime
+  environment: &environment
+    APP_ENV: test
+    APP_ORIGIN: http://127.0.0.1:3000
+    APP_HOST: 0.0.0.0
+    DATABASE_URL: postgresql://broker_test:${BROKER_APP_PASSWORD:?Run pnpm env:setup}@postgres:5432/broker_blog_test
+    MEDIA_ROOT: /app/.local/media/test
+    SESSION_SECRET: ${SESSION_SECRET:?Run pnpm env:setup}
+    CAPTCHA_SECRET: ${CAPTCHA_SECRET:?Run pnpm env:setup}
+    NEXT_TELEMETRY_DISABLED: "1"
+  volumes:
+    - media:/app/.local/media/test
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_USER: broker_bootstrap
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run pnpm env:setup}
+      POSTGRES_DB: postgres
+      BROKER_APP_PASSWORD: ${BROKER_APP_PASSWORD:?Run pnpm env:setup}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/01-broker.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U broker_bootstrap -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    <<: *app
+    ports: ["127.0.0.1:3000:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    <<: *app
+    command: ["pnpm", "worker"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "const h=JSON.parse(require('fs').readFileSync('.local/worker-heartbeat.json'));process.exit(h.status==='ready'&&Date.now()-Date.parse(h.updatedAt)<20000?0:1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  test:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: test
+    environment:
+      <<: *environment
+      PLAYWRIGHT_BASE_URL: http://web:3000
+      PLAYWRIGHT_BROWSERS_PATH: /opt/playwright
+    volumes: []
+    depends_on:
+      web:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+    command: ["pnpm", "exec", "playwright", "test"]
+
+volumes:
+  postgres:
+  media:
