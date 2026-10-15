@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { AppError } from "../../contracts/errors";
 import { systemClock, type Clock } from "../../infrastructure/clock";
-import { withTransaction } from "../../infrastructure/db/transaction";
+import { withTransaction, type Transaction } from "../../infrastructure/db/transaction";
 import { requireWritableActor, withIdempotency } from "../foundation/idempotency";
 import type { mediaService } from "../media/service";
 import { extractMediaIds } from "./policy";
@@ -20,6 +20,12 @@ export function contentService(options: { pool: Pool; secret: string; media: Med
   const { pool, secret, media } = options;
   const clock = options.clock ?? systemClock;
 
+  async function replaceMediaReferences(tx: Transaction, actorId: string, articleId: string, mediaIds: string[]) {
+    if (mediaIds.length) await media.validateReferences(tx, actorId, mediaIds);
+    await tx.client.query("DELETE FROM draft_media WHERE article_id=$1", [articleId]);
+    for (const mediaId of mediaIds) await tx.client.query("INSERT INTO draft_media (article_id,media_id) VALUES ($1,$2) ON CONFLICT DO NOTHING", [articleId, mediaId]);
+  }
+
   /** New drafts are idempotent: a retried create returns the original article instead of a duplicate. */
   async function createDraft(input: { actorId: string; idempotencyKey: string; title?: string; markdown?: string; summary?: string }) {
     const request = { title: input.title ?? "", markdown: input.markdown ?? "", summary: input.summary ?? "" };
@@ -30,9 +36,11 @@ export function contentService(options: { pool: Pool; secret: string; media: Med
       const articleId = randomUUID();
       await t.client.query("INSERT INTO articles (id,author_id,status) VALUES ($1,$2,'draft')", [articleId, input.actorId]);
       await t.client.query("INSERT INTO article_drafts (article_id,version,title,markdown,summary) VALUES ($1,1,$2,$3,$4)", [articleId, request.title, request.markdown, request.summary]);
+      await replaceMediaReferences(t, input.actorId, articleId, extractMediaIds(request.markdown));
       return { resourceId: articleId, version: 1 };
     }));
-    return { draft: await loadDraft({ viewerId: input.actorId, articleId: receipt.resourceId }), replayed };
+    // The receipt identifies this write; the current draft may already include another window's write.
+    return { draft: await loadDraft({ viewerId: input.actorId, articleId: receipt.resourceId }), replayed, version: receipt.version! };
   }
 
   /**
@@ -53,13 +61,10 @@ export function contentService(options: { pool: Pool; secret: string; media: Med
         "UPDATE article_drafts SET version=version+1,title=$2,markdown=$3,summary=$4,saved_at=now() WHERE article_id=$1 AND version=$5 RETURNING version",
         [input.articleId, input.title, input.markdown, input.summary, input.baseDraftVersion]);
       if (!updated.rowCount) throw new AppError("DRAFT_VERSION_CONFLICT", 409, "草稿已在其他窗口更新，请保留本地修改或载入服务器版本。");
-      // Draft media references may be incomplete, but never point at another account's private media.
-      if (mediaIds.length) await media.validateReferences(t, input.actorId, mediaIds);
-      await t.client.query("DELETE FROM draft_media WHERE article_id=$1", [input.articleId]);
-      for (const mediaId of mediaIds) await t.client.query("INSERT INTO draft_media (article_id,media_id) VALUES ($1,$2) ON CONFLICT DO NOTHING", [input.articleId, mediaId]);
+      await replaceMediaReferences(t, input.actorId, input.articleId, mediaIds);
       return { resourceId: input.articleId, version: updated.rows[0].version };
     }));
-    return { draft: await loadDraft({ viewerId: input.actorId, articleId: receipt.resourceId }), replayed, version: receipt.version ?? input.baseDraftVersion };
+    return { draft: await loadDraft({ viewerId: input.actorId, articleId: receipt.resourceId }), replayed, version: receipt.version! };
   }
 
   /** Drafts are readable and writable by their author only; a banned author keeps read-only access. */

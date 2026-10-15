@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { backupId, isBackupRecord } from "../../src/features/editor/local-backup";
-import { resolveSessionId, resolveTempDraftId } from "../../src/features/editor/editor-session";
+import { claimEditorSession, EDITOR_SESSION_KEY, resolveSessionId, resolveTempDraftId } from "../../src/features/editor/editor-session";
 import { safeUrl } from "../../src/features/editor/markdown-url";
-import { createSaveScheduler, type SaveOutcome, type SchedulerTimers } from "../../src/features/editor/save-scheduler";
+import { createSaveScheduler, type BackupPayload, type SavePayload, type SaveOutcome, type SchedulerTimers } from "../../src/features/editor/save-scheduler";
 import { contentPolicy, extractMediaIds } from "../../src/modules/content/policy";
 
 /** 受控时钟：按时间顺序触发到期定时器，并在每次触发后让异步处理器结算。 */
@@ -32,7 +32,7 @@ function fakeClock() {
   };
 }
 
-function schedulerFor(options: { save: () => Promise<SaveOutcome>; backup?: () => void | Promise<void>; initialVersion?: number }) {
+function schedulerFor(options: { save: (payload: SavePayload) => Promise<SaveOutcome>; backup?: (payload: BackupPayload) => void | Promise<void>; initialVersion?: number }) {
   const clock = fakeClock();
   const events: string[] = [];
   const backups: { ok: boolean; at: number }[] = [];
@@ -41,7 +41,7 @@ function schedulerFor(options: { save: () => Promise<SaveOutcome>; backup?: () =
     cadence: contentPolicy.autosave,
     snapshot: () => ({ title: "标题", markdown: "正文", summary: "" }),
     backup: options.backup ?? (() => { events.push("backup"); }),
-    save: async () => { events.push("save"); return options.save(); },
+    save: async (payload) => { events.push("save"); return options.save(payload); },
     onState: (state) => events.push(`state:${state}`),
     onBackup: (result) => backups.push(result),
     timers: clock.timers,
@@ -71,6 +71,61 @@ describe("B2 save scheduling", () => {
     const { scheduler, clock, events } = schedulerFor({ save: async () => ({ ok: true, version: 2 }) });
     for (let second = 0; second < 35; second++) { scheduler.input(); await clock.advance(1_000); }
     expect(events.filter((event) => event === "save")).toHaveLength(1);
+  });
+
+  it("backs up every second during uninterrupted input rather than waiting for a pause", async () => {
+    const { scheduler, clock, backups, events } = schedulerFor({ save: async () => ({ ok: true, version: 2 }) });
+    for (let tick = 0; tick < 40; tick++) { scheduler.input(); await clock.advance(250); }
+    expect(backups.map((backup) => backup.at)).toEqual(Array.from({ length: 10 }, (_, index) => (index + 1) * 1000));
+    expect(events).not.toContain("save");
+    scheduler.destroy();
+  });
+
+  it("continues local backup for new conflict text while server writes stay paused", async () => {
+    const copies: BackupPayload[] = [];
+    const { scheduler, clock, events } = schedulerFor({ save: async () => ({ ok: false, kind: "conflict" }), backup: (payload) => { copies.push(payload); } });
+    scheduler.input(); await clock.advance(3000);
+    expect(scheduler.state()).toBe("conflict");
+    const firstRevision = copies.at(-1)!.revision;
+    scheduler.input(); await clock.advance(1000);
+    expect(copies.at(-1)).toMatchObject({ revision: firstRevision + 1, unsynced: true });
+    await clock.advance(30000);
+    expect(events.filter((event) => event === "save")).toHaveLength(1);
+    scheduler.destroy();
+  });
+
+  it("keeps revisions unique when editing resumes after loading a server version", async () => {
+    const writes: SavePayload[] = [];
+    const { scheduler, clock } = schedulerFor({ save: async (payload) => {
+      writes.push(payload);
+      return writes.length === 2 ? { ok: false, kind: "conflict" } : { ok: true, version: payload.baseVersion + 1 };
+    } });
+    scheduler.input(); await scheduler.saveNow();
+    scheduler.input(); await scheduler.saveNow();
+    expect(scheduler.state()).toBe("conflict");
+    scheduler.adoptServer(7);
+    scheduler.input(); await scheduler.saveNow(); await clock.flush();
+    expect(writes.map((write) => write.revision)).toEqual([1, 2, 3]);
+    expect(writes.at(-1)?.baseVersion).toBe(7);
+    expect(scheduler.state()).toBe("synced");
+    scheduler.destroy();
+  });
+
+  it("stores the confirmed sync state even when manual save finishes before the backup timer", async () => {
+    const copies: BackupPayload[] = [];
+    const { scheduler, clock } = schedulerFor({ save: async () => ({ ok: true, version: 2 }), backup: (payload) => { copies.push(payload); } });
+    scheduler.input(); await scheduler.saveNow(); await clock.advance(1000);
+    expect(copies.at(-1)).toMatchObject({ unsynced: false, baseVersion: 2 });
+    scheduler.destroy();
+  });
+
+  it("does not update a destroyed editor when its save response arrives late", async () => {
+    let complete!: (result: SaveOutcome) => void;
+    const { scheduler, events, clock } = schedulerFor({ save: () => new Promise((resolve) => { complete = resolve; }) });
+    scheduler.input(); const saved = scheduler.saveNow();
+    scheduler.destroy(); complete({ ok: true, version: 2 }); await saved; await clock.advance(30000);
+    expect(events).not.toContain("state:synced");
+    expect(events).not.toContain("backup");
   });
 
   it("never reports synced for text that changed while a save was in flight", async () => {
@@ -120,6 +175,32 @@ describe("B2 save scheduling", () => {
 });
 
 describe("B2 editor helpers", () => {
+  it("keeps a live owner listening when a tab is copied later and releases ownership on exit", async () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+    const first = await claimEditorSession({ storage });
+    let duplicate: Awaited<ReturnType<typeof claimEditorSession>> | undefined;
+    try {
+      const clonedValues = new Map(values);
+      const clonedStorage = { getItem: (key: string) => clonedValues.get(key) ?? null, setItem: (key: string, value: string) => { clonedValues.set(key, value); } };
+      duplicate = await claimEditorSession({ storage: clonedStorage });
+      expect(duplicate.id).not.toBe(first.id);
+      expect(values.get(EDITOR_SESSION_KEY)).toBe(first.id);
+      first.release();
+      const refreshed = await claimEditorSession({ storage });
+      try { expect(refreshed.id).toBe(first.id); } finally { refreshed.release(); }
+    } finally { first.release(); duplicate?.release(); }
+  });
+
+  it("resolves simultaneous claims for a cloned session without sharing the backup key", async () => {
+    const makeStorage = () => {
+      const values = new Map([[EDITOR_SESSION_KEY, "cloned-editor"]]);
+      return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+    };
+    const claims = await Promise.all([claimEditorSession({ storage: makeStorage() }), claimEditorSession({ storage: makeStorage() })]);
+    try { expect(new Set(claims.map((claim) => claim.id)).size).toBe(2); }
+    finally { claims.forEach((claim) => claim.release()); }
+  });
   it("keeps editor sessions separate and re-keys a duplicated tab", () => {
     const generate = () => "new-session";
     expect(resolveSessionId({ stored: "tab-a", occupied: false, generate })).toBe("tab-a");

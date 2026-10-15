@@ -54,7 +54,7 @@ function writeHeaders(account: Account, key = randomUUID(), csrf = account.csrf)
 
 async function createDraft(account: Account, body: Partial<{ title: string; markdown: string; summary: string }> = {}, key = randomUUID()) {
   const response = await account.context.post("/api/v1/articles", { headers: writeHeaders(account, key), data: body, failOnStatusCode: false });
-  return { response, body: response.ok() ? (await response.json()).data as { draft: Draft; replayed: boolean } : null };
+  return { response, body: response.ok() ? (await response.json()).data as { draft: Draft; replayed: boolean; version: number } : null };
 }
 
 async function saveDraft(account: Account, draft: Draft, patch: Partial<{ title: string; markdown: string; summary: string; baseDraftVersion: number }> = {}, key = randomUUID()) {
@@ -111,6 +111,47 @@ test("B2 draft saves advance the version, replay safely and refuse stale base ve
   expect(stale.response.status()).toBe(409);
   expect((await stale.response.json()).error.code).toBe("DRAFT_VERSION_CONFLICT");
   expect(((await (await author.context.get(`/api/v1/articles/${draft.articleId}/draft`)).json()).data.draft as Draft).markdown).toBe("第一版正文");
+});
+
+test("B2 response-loss replay retains its own receipt version after another window saves", async () => {
+  const createKey = randomUUID();
+  const created = await createDraft(author, { title: "保存回执" }, createKey);
+  const original = created.body!.draft;
+  const key = randomUUID();
+  const first = await saveDraft(author, original, { markdown: "窗口 A" }, key);
+  const remote = await saveDraft(author, first.body!.draft, { markdown: "窗口 B" });
+  expect(remote.body?.draft.version).toBe(3);
+  const replay = await saveDraft(author, original, { markdown: "窗口 A" }, key);
+  expect(replay.body).toMatchObject({ replayed: true, version: 2, draft: { version: 3, markdown: "窗口 B" } });
+  const stale = await saveDraft(author, { ...original, version: replay.body!.version }, { markdown: "A 重试后的修改" });
+  expect(stale.response.status()).toBe(409);
+  const replayCreate = await createDraft(author, { title: "保存回执" }, createKey);
+  expect(replayCreate.body).toMatchObject({ replayed: true, version: 1, draft: { articleId: original.articleId, version: 3 } });
+  const current = (await (await author.context.get(`/api/v1/articles/${original.articleId}/draft`)).json()).data.draft;
+  expect(current.markdown).toBe("窗口 B");
+});
+
+test("B2 the first draft save validates and registers media references atomically", async () => {
+  const uploaded = await author.context.post("/api/v1/media", { headers: { Origin: origin, "Content-Type": "image/png", "X-CSRF-Token": author.csrf }, data: pngBytes() });
+  const id = (await uploaded.json()).data.media.id as string;
+  const created = await createDraft(author, { markdown: `![新图](/api/v1/media/${id})` });
+  expect(created.response.status()).toBe(200);
+  expect((await pool.query("SELECT media_id FROM draft_media WHERE article_id=$1", [created.body!.draft.articleId])).rows).toEqual([{ media_id: id }]);
+
+  const staging = await stagingMedia(author.userId);
+  const key = randomUUID();
+  const before = (await pool.query("SELECT count(*)::int AS n FROM articles WHERE author_id=$1", [author.userId])).rows[0].n;
+  const rejected = await createDraft(author, { markdown: `![未完成](/api/v1/media/${staging})` }, key);
+  expect(rejected.response.status()).toBe(409);
+  expect((await pool.query("SELECT count(*)::int AS n FROM articles WHERE author_id=$1", [author.userId])).rows[0].n).toBe(before);
+  expect((await pool.query("SELECT 1 FROM idempotency_keys WHERE actor_id=$1 AND key=$2", [author.userId, key])).rowCount).toBe(0);
+  const retried = await createDraft(author, { markdown: "修正后的内容" }, key);
+  expect(retried.response.status()).toBe(200);
+
+  const otherUpload = await other.context.post("/api/v1/media", { headers: { Origin: origin, "Content-Type": "image/png", "X-CSRF-Token": other.csrf }, data: pngBytes() });
+  const otherId = (await otherUpload.json()).data.media.id as string;
+  const forbidden = await createDraft(author, { markdown: `![他人图片](/api/v1/media/${otherId})` });
+  expect(forbidden.response.status()).toBe(403);
 });
 
 test("B2 draft writes require a normal account and session CSRF", async () => {

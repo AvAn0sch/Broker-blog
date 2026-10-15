@@ -44,7 +44,9 @@ export function createBackupStore(options: { factory?: IDBFactory; database?: st
     return new Promise<T>((resolve, reject) => {
       const transaction = db.transaction(BACKUP_STORE, mode);
       const request = work(transaction.objectStore(BACKUP_STORE));
-      request.onsuccess = () => resolve(request.result);
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onabort = () => reject(transaction.error ?? new Error("本地备份事务未完成。"));
+      transaction.onerror = () => reject(transaction.error ?? new Error("本地备份操作失败。"));
       request.onerror = () => reject(request.error ?? new Error("本地备份操作失败。"));
     });
   }
@@ -57,6 +59,23 @@ export function createBackupStore(options: { factory?: IDBFactory; database?: st
       return values.filter(isBackupRecord).sort((a, b) => b.savedAt - a.savedAt);
     },
     async remove(id: string) { await transact("readwrite", (store) => store.delete(id)); },
+    async move(from: string, to: string, draftId: string) {
+      if (from === to) return;
+      const db = await open();
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(BACKUP_STORE, "readwrite");
+        const store = transaction.objectStore(BACKUP_STORE);
+        const source = store.get(from), destination = store.get(to);
+        destination.onsuccess = () => {
+          if (isBackupRecord(source.result)) {
+            if (!isBackupRecord(destination.result) || destination.result.savedAt < source.result.savedAt) store.put({ ...source.result, id: to, draftId });
+            store.delete(from);
+          }
+        };
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = transaction.onerror = () => reject(transaction.error ?? new Error("本地副本迁移失败。"));
+      });
+    },
     async clearUser(userId: string) {
       const ids = (await transact<IDBValidKey[]>("readonly", (store) => store.index("byUser").getAllKeys(userId)));
       for (const id of ids) await transact("readwrite", (store) => store.delete(id));

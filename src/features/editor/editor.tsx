@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { contentPolicy } from "@/modules/content/policy";
 import { CodeEditor, type CodeEditorHandle } from "./code-editor";
-import { editorSessionId, tempDraftId } from "./editor-session";
+import { claimEditorSession, tempDraftId, type EditorSession } from "./editor-session";
 import { backupId, createBackupStore, type BackupRecord } from "./local-backup";
 import { Markdown } from "./markdown";
 import { createSaveScheduler, type EditorSaveState, type SaveOutcome, type SavePayload } from "./save-scheduler";
@@ -39,7 +39,7 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
   const session = useRef("");
   const draftKey = useRef(draft?.articleId ?? "");
   const csrf = useRef("");
-  const keys = useRef(new Map<number, string>());
+  const keys = useRef(new Map<string, string>());
   const scheduler = useRef<ReturnType<typeof createSaveScheduler> | null>(null);
   const editor = useRef<CodeEditorHandle | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -47,9 +47,10 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
   const lastVersion = useRef(draft?.version ?? 0);
   const inputSeen = useRef(false);
 
-  const keyFor = useCallback((revision: number) => {
-    if (!keys.current.has(revision)) keys.current.set(revision, crypto.randomUUID());
-    return keys.current.get(revision)!;
+  const keyFor = useCallback((payload: SavePayload) => {
+    const scope = `${article.current ?? "new"}:${payload.baseVersion}:${payload.revision}`;
+    if (!keys.current.has(scope)) keys.current.set(scope, crypto.randomUUID());
+    return keys.current.get(scope)!;
   }, []);
 
   const refreshCopies = useCallback(async () => {
@@ -59,54 +60,52 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
 
   /** 临时草稿首次保存成功后，把本窗口副本迁移到真实文章键，保留文本与基础版本。 */
   const migrateBackup = useCallback(async (from: string, to: string) => {
-    const existing = await store.read(backupId(userId, from, session.current)).catch(() => null);
-    if (!existing) return;
-    await store.put({ ...existing, id: backupId(userId, to, session.current), draftId: to });
-    await store.remove(backupId(userId, from, session.current));
+    await store.move(backupId(userId, from, session.current), backupId(userId, to, session.current), to);
   }, [store, userId]);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    let lease: EditorSession | undefined;
     void (async () => {
-      session.current = await editorSessionId();
+      lease = await claimEditorSession({ signal: controller.signal });
+      if (cancelled) { lease.release(); return; }
+      session.current = lease.id;
       draftKey.current = draft?.articleId ?? tempDraftId();
-      const context = await fetch("/api/v1/auth/context", { cache: "no-store" }).then((response) => response.json()).catch(() => null);
+      const context = await fetch("/api/v1/auth/context", { cache: "no-store", signal: controller.signal }).then((response) => response.json()).catch(() => null);
+      if (cancelled) return;
       csrf.current = context?.data?.csrfToken ?? context?.data?.anonymousCsrfToken ?? "";
       const found = await store.listForDraft(userId, draftKey.current).catch(() => [] as BackupRecord[]);
       if (cancelled) return;
       const unsynced = found.filter((copy) => copy.unsynced);
       setCopies(unsynced);
       setShowRecovery(unsynced.length > 0);
-    })();
-    return () => { cancelled = true; };
+    })().catch(() => {
+      if (!cancelled) { setBackupFailed(true); setBackupNote("本地备份初始化失败：请使用“导出草稿”保存内容"); }
+    });
+    return () => { cancelled = true; controller.abort(); lease?.release(); };
   }, [draft?.articleId, store, userId]);
-
-  /** 保存成功后本窗口副本不再算未同步；期间又有新输入时保持未同步以便继续提示。 */
-  const markCopySynced = useCallback(async (version: number, revision: number) => {
-    if (scheduler.current && scheduler.current.revision() !== revision) return;
-    if (!session.current || !draftKey.current) return;
-    const id = backupId(userId, draftKey.current, session.current);
-    const existing = await store.read(id).catch(() => null);
-    if (!existing) return;
-    await store.put({ ...existing, unsynced: false, baseVersion: version }).catch(() => {});
-  }, [store, userId]);
 
   const performSave = useCallback(async (payload: SavePayload): Promise<SaveOutcome> => {
     const body = { title: payload.title, markdown: payload.markdown, summary: payload.summary };
-    const headers = { "Content-Type": "application/json", "X-CSRF-Token": csrf.current, "X-Idempotency-Key": keyFor(payload.revision) };
+    const headers = { "Content-Type": "application/json", "X-CSRF-Token": csrf.current, "X-Idempotency-Key": keyFor(payload) };
     try {
       if (!article.current) {
         const response = await fetch("/api/v1/articles", { method: "POST", headers, body: JSON.stringify(body), cache: "no-store" });
         if (response.status === 409) return { ok: false, kind: "conflict" };
         if (!response.ok) return { ok: false, kind: "failure" };
-        const created = (await response.json() as { data: { draft: DraftView } }).data.draft;
+        const { draft: created, version } = (await response.json() as { data: { draft: DraftView; version: number } }).data;
         article.current = created.articleId;
         setArticleId(created.articleId);
-        await migrateBackup(draftKey.current, created.articleId);
+        const previousKey = draftKey.current;
         draftKey.current = created.articleId;
+        await migrateBackup(previousKey, created.articleId).catch(() => { setBackupFailed(true); setBackupNote("本地副本迁移失败：请导出当前内容"); });
         window.history.replaceState(null, "", `/editor/${created.articleId}`);
-        void markCopySynced(created.version, payload.revision);
-        return { ok: true, version: created.version };
+        if (created.version !== version) {
+          setNotice("此次保存已确认，但草稿随后已在其他窗口更新。请先导出或复制本地修改，再载入服务器版本。");
+          return { ok: false, kind: "conflict" };
+        }
+        return { ok: true, version };
       }
       const response = await fetch(`/api/v1/articles/${article.current}/draft`, { method: "PATCH", headers, body: JSON.stringify({ ...body, baseDraftVersion: payload.baseVersion }), cache: "no-store" });
       if (response.status === 409) {
@@ -116,11 +115,14 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
         return { ok: false, kind: "conflict" };
       }
       if (!response.ok) return { ok: false, kind: "failure" };
-      const saved = (await response.json() as { data: { draft: DraftView } }).data.draft;
-      void markCopySynced(saved.version, payload.revision);
-      return { ok: true, version: saved.version };
+      const { draft: saved, version } = (await response.json() as { data: { draft: DraftView; version: number } }).data;
+      if (saved.version !== version) {
+        setNotice("此次保存已确认，但草稿随后已在其他窗口更新。请先导出或复制本地修改，再载入服务器版本。");
+        return { ok: false, kind: "conflict" };
+      }
+      return { ok: true, version };
     } catch { return { ok: false, kind: "failure" }; }
-  }, [keyFor, markCopySynced, migrateBackup]);
+  }, [keyFor, migrateBackup]);
 
   useEffect(() => {
     const instance = createSaveScheduler({
@@ -128,11 +130,11 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
       cadence: contentPolicy.autosave,
       snapshot: () => ({ title: latest.current.title, markdown: latest.current.markdown, summary: summary.current }),
       backup: async (payload) => {
-        if (!session.current || !draftKey.current) return;
+        if (!session.current || !draftKey.current) throw new Error("Editor session is not ready.");
         await store.put({
           id: backupId(userId, draftKey.current, session.current), userId, draftId: draftKey.current, sessionId: session.current,
           title: payload.title, markdown: payload.markdown, summary: payload.summary,
-          baseVersion: payload.baseVersion, unsynced: true, savedAt: Date.now(), origin: window.location.pathname,
+          baseVersion: payload.baseVersion, unsynced: payload.unsynced, savedAt: Date.now(), origin: window.location.pathname,
         });
       },
       save: performSave,
@@ -184,15 +186,23 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
 
   async function loadServerVersion() {
     if (!article.current) { setNotice("当前还没有服务器草稿。"); return; }
-    const response = await fetch(`/api/v1/articles/${article.current}/draft`, { cache: "no-store" });
-    if (!response.ok) { setNotice("无法读取服务器版本，请稍后重试。"); return; }
-    const server = (await response.json() as { data: { draft: DraftView } }).data.draft;
-    setTitle(server.title); setMarkdown(server.markdown);
-    latest.current = { title: server.title, markdown: server.markdown };
-    summary.current = server.summary;
-    scheduler.current?.adoptServer(server.version);
-    setNotice("已载入服务器版本（v" + server.version + "）。本地修改仍保留在本地副本中，可随时导出。");
-    await refreshCopies();
+    const instance = scheduler.current;
+    if (!instance) return;
+    const revision = instance.revision();
+    if (!await instance.backupNow()) { setNotice("本地副本未能保存。请先复制或导出当前内容，再载入服务器版本。"); return; }
+    try {
+      const response = await fetch(`/api/v1/articles/${article.current}/draft`, { cache: "no-store" });
+      if (!response.ok) { setNotice("无法读取服务器版本，请稍后重试。"); return; }
+      const server = (await response.json() as { data: { draft: DraftView } }).data.draft;
+      if (instance !== scheduler.current || revision !== instance.revision()) { setNotice("读取期间有新的本地输入，已保留当前文本。请再次选择载入服务器版本。"); return; }
+      setTitle(server.title); setMarkdown(server.markdown);
+      latest.current = { title: server.title, markdown: server.markdown };
+      summary.current = server.summary;
+      instance.adoptServer(server.version);
+      keys.current.clear();
+      setNotice("已载入服务器版本（v" + server.version + "）。本地修改仍保留在本地副本中，可随时导出。");
+      await refreshCopies();
+    } catch { setNotice("无法读取服务器版本，请稍后重试。"); }
   }
 
   function recover(copy: BackupRecord) {

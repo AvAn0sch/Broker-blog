@@ -37,7 +37,7 @@ try {
   let result = {};
   try { result = JSON.parse(await readFile(path.join(reports, "results.json"), "utf8")).stats; } catch {}
   if (!result || !result.expected || result.skipped || result.unexpected || result.flaky) code = 1;
-  const summary = { runId: run.id, commit, dirty, started, ended: new Date().toISOString(), node: process.version, configurationVersion: "b1-v1", datasetVersion: "identity-media-v1", browser: "chromium-1248 / 156.0.8078.4", result, exitCode: code, cleanup };
+  const summary = { runId: run.id, commit, dirty, started, ended: new Date().toISOString(), node: process.version, configurationVersion: "b2-v2", datasetVersion: "identity-media-editor-v2", browser: "chromium-1248 / 156.0.8078.4", result, exitCode: code, cleanup };
   await writeFile(path.join(reports, "summary.json"), JSON.stringify(summary, null, 2));
   await writeFile(path.join(reports, "summary.md"), `# Foundation run ${run.id}\n\nCommit: ${commit}\n\nDirty: ${dirty}\n\nExit code: ${code}\n\nCleanup: ${cleanup}\n\nResults: ${JSON.stringify(result)}\n`);
   console.log(`Report: ${path.join(reports, "summary.json")} (cleanup: ${cleanup})`);

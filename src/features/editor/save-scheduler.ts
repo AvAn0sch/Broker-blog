@@ -1,6 +1,7 @@
 export type EditorSaveState = "synced" | "unsynced" | "saving" | "failed" | "conflict";
 export type DraftSnapshot = { title: string; markdown: string; summary: string };
 export type SavePayload = DraftSnapshot & { revision: number; baseVersion: number };
+export type BackupPayload = SavePayload & { unsynced: boolean };
 export type SaveOutcome = { ok: true; version: number } | { ok: false; kind: "conflict" | "failure" };
 export type SchedulerTimers = { setTimeout: (handler: () => void, ms: number) => unknown; clearTimeout: (handle: unknown) => void };
 
@@ -19,7 +20,7 @@ export function createSaveScheduler(options: {
   initialVersion: number;
   cadence: SaveCadence;
   snapshot: () => DraftSnapshot;
-  backup: (payload: SavePayload) => void | Promise<void>;
+  backup: (payload: BackupPayload) => void | Promise<void>;
   save: (payload: SavePayload) => Promise<SaveOutcome>;
   onState: (state: EditorSaveState) => void;
   onBackup?: (result: { ok: boolean; at: number }) => void;
@@ -35,24 +36,34 @@ export function createSaveScheduler(options: {
   let blocked = false;
   let saving = false;
   let queued = false;
+  let destroyed = false;
+  let generation = 0;
+  let backupQueue = Promise.resolve(true);
   let backupTimer: unknown;
   let idleTimer: unknown;
   let maxTimer: unknown;
 
   function setState(next: EditorSaveState) { if (state !== next) { state = next; options.onState(next); } }
   function clear(handle: unknown) { if (handle !== undefined) { timers.clearTimeout(handle); } }
-  function cancelTimers() { clear(backupTimer); clear(idleTimer); clear(maxTimer); backupTimer = idleTimer = maxTimer = undefined; }
+  function cancelSaveTimers() { clear(idleTimer); clear(maxTimer); idleTimer = maxTimer = undefined; }
+  function cancelTimers() { clear(backupTimer); backupTimer = undefined; cancelSaveTimers(); }
 
-  async function runBackup() {
-    const payload = { ...options.snapshot(), revision, baseVersion: version };
-    try { await options.backup(payload); options.onBackup?.({ ok: true, at: now() }); }
-    catch { options.onBackup?.({ ok: false, at: now() }); }
+  function runBackup() {
+    // Serial writes take the latest snapshot when executed, so a slow older write cannot win.
+    backupQueue = backupQueue.then(async () => {
+      if (destroyed) return false;
+      const payload = { ...options.snapshot(), revision, baseVersion: version, unsynced: revision !== savedRevision };
+      try { await options.backup(payload); if (!destroyed) options.onBackup?.({ ok: true, at: now() }); return true; }
+      catch { if (!destroyed) options.onBackup?.({ ok: false, at: now() }); return false; }
+    });
+    return backupQueue;
   }
 
   async function runSave(reason: "idle" | "max" | "manual"): Promise<void> {
-    if (blocked) return;
+    if (blocked || destroyed) return;
     if (saving) { queued = true; return; }
     const target = revision;
+    const startedGeneration = generation;
     // 没有新的修改就不重复提交：重复提交会用同一标识携带新的基础版本，被服务端判为冲突。
     if (target === savedRevision) return;
     const payload = { ...options.snapshot(), revision: target, baseVersion: version };
@@ -62,15 +73,17 @@ export function createSaveScheduler(options: {
     try { outcome = await options.save(payload); }
     catch { outcome = { ok: false, kind: "failure" }; }
     saving = false;
+    if (destroyed || startedGeneration !== generation) return;
     if (outcome.ok) {
       version = outcome.version;
       savedRevision = target;
       // 迟到响应：期间又有新输入时不能标记为已同步。
       setState(target === revision ? "synced" : "unsynced");
-      if (target === revision) cancelTimers();
+      if (target === revision) cancelSaveTimers();
+      void runBackup();
     } else if (outcome.kind === "conflict") {
       blocked = true;
-      cancelTimers();
+      cancelSaveTimers();
       setState("conflict");
     } else {
       setState(target === revision ? "failed" : "unsynced");
@@ -80,21 +93,28 @@ export function createSaveScheduler(options: {
 
   return {
     input() {
+      if (destroyed) return;
       revision += 1;
+      // Local recovery keeps running when server submission is blocked by a conflict.
+      if (backupTimer === undefined) backupTimer = timers.setTimeout(() => { backupTimer = undefined; void runBackup(); }, options.cadence.localBackupMs);
       if (blocked) { setState("conflict"); return; }
       setState("unsynced");
-      clear(backupTimer); backupTimer = timers.setTimeout(() => { backupTimer = undefined; void runBackup(); }, options.cadence.localBackupMs);
       clear(idleTimer); idleTimer = timers.setTimeout(() => { idleTimer = undefined; void runSave("idle"); }, options.cadence.idleSaveMs);
       if (maxTimer === undefined) maxTimer = timers.setTimeout(() => { maxTimer = undefined; void runSave("max"); }, options.cadence.maxSaveMs);
     },
     saveNow: () => runSave("manual"),
+    backupNow: runBackup,
     /** 用户选择载入服务器版本：本地文本被替换，调度从该版本重新开始。 */
-    adoptServer(nextVersion: number) { blocked = false; revision = 0; savedRevision = 0; version = nextVersion; cancelTimers(); setState("synced"); },
+    adoptServer(nextVersion: number) {
+      generation += 1; blocked = false; queued = false;
+      // Keep revision monotonic so a new editing cycle never reuses an old submission key.
+      savedRevision = revision; version = nextVersion; cancelTimers(); setState("synced");
+    },
     state: () => state,
     version: () => version,
     revision: () => revision,
     blocked: () => blocked,
-    destroy: cancelTimers,
+    destroy() { destroyed = true; cancelTimers(); },
   };
 }
 

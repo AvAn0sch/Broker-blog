@@ -28,6 +28,23 @@ async function unsavedGuardActive(page: Page) {
   });
 }
 
+async function copiesFor(page: Page, draftId: string) {
+  return page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("broker-blog-editor", 1);
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<{ draftId: string; sessionId: string; markdown: string; unsynced: boolean }[]>((resolve, reject) => {
+        const tx = db.transaction("copies", "readonly");
+        const request = tx.objectStore("copies").getAll();
+        tx.oncomplete = () => resolve(request.result.filter((copy) => copy.draftId === id));
+        tx.onabort = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, draftId);
+}
+
 test("B2 autosave, local backup, failed save and refresh recovery", async ({ page }) => {
   test.slow();
   await registerThroughUi(page, { nickname: "编辑成员", password });
@@ -97,6 +114,12 @@ test("B2 conflicting windows keep both copies recoverable", async ({ page }) => 
     await expect(second.getByTestId("save-state")).toHaveAttribute("data-state", "conflict", { timeout: 15_000 });
     await expect(second.getByRole("button", { name: "载入服务器版本" })).toBeVisible();
 
+    // Pausing server saves must not stop local recovery for text entered after the conflict.
+    await (await editorBody(second)).click();
+    await second.keyboard.type("\n冲突后继续编辑的文字。");
+    const draftId = new URL(draftUrl).pathname.split("/").at(-1)!;
+    await expect.poll(async () => (await copiesFor(second, draftId)).some((copy) => copy.unsynced && copy.markdown.includes("冲突后继续编辑的文字"))).toBe(true);
+
     await second.getByRole("button", { name: "载入服务器版本" }).click();
     await expect(await editorBody(second)).toContainText("第一个窗口追加的更新");
     await expect(second.getByTestId("save-state")).toHaveAttribute("data-state", "synced");
@@ -112,6 +135,83 @@ test("B2 conflicting windows keep both copies recoverable", async ({ page }) => 
   await (await editorBody(page)).click();
   await page.keyboard.type("\n\n冲突之后第一个窗口继续编辑。");
   await expect(page.getByTestId("save-state")).toHaveAttribute("data-state", "synced", { timeout: 15_000 });
+});
+
+test("B2 a response-loss replay cannot adopt another window's version and editing resumes after loading the server version", async ({ page }) => {
+  test.slow();
+  await registerThroughUi(page, { nickname: "重试成员", password });
+  await page.goto("/editor/new");
+  await page.getByLabel("文章标题").fill("保存重试");
+  await (await editorBody(page)).click(); await page.keyboard.type("基础正文");
+  await expect(page.getByTestId("save-state")).toHaveAttribute("data-state", "synced");
+  await expect(page).toHaveURL(/\/editor\/[0-9a-f-]{36}$/);
+  await page.reload();
+  // A successful PATCH consumes revision 1's key before the later conflict/rebase.
+  await (await editorBody(page)).click(); await page.keyboard.type("\n第一次成功保存。");
+  await expect(page.getByTestId("save-state")).toHaveAttribute("data-state", "synced");
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
+  const endpoint = `/api/v1/articles/${id}/draft`;
+  let receiptVersion = 0;
+  await page.route(`**${endpoint}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    const result = await (await route.fetch()).json();
+    receiptVersion = result.data.version;
+    const csrf = route.request().headers()["x-csrf-token"];
+    const remote = await page.request.patch(endpoint, {
+      headers: { Origin: new URL(page.url()).origin, "X-CSRF-Token": csrf, "X-Idempotency-Key": crypto.randomUUID() },
+      data: { baseDraftVersion: receiptVersion, title: "保存重试", markdown: "另一个窗口确认的新正文", summary: "" },
+    });
+    expect(remote.status()).toBe(200);
+    await route.abort();
+  });
+  await (await editorBody(page)).click(); await page.keyboard.type("\n尚未收到响应的修改。");
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect(page.getByTestId("save-state")).toHaveAttribute("data-state", "failed");
+  await page.unroute(`**${endpoint}`);
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect(page.getByTestId("save-state")).toHaveAttribute("data-state", "conflict");
+  await expect(await editorBody(page)).toContainText("尚未收到响应的修改");
+  const current = (await (await page.request.get(endpoint)).json()).data.draft;
+  expect(current.version).toBe(receiptVersion + 1);
+  expect(current.markdown === "另一个窗口确认的新正文").toBe(true);
+
+  await page.getByRole("button", { name: "载入服务器版本" }).click();
+  await expect(page.getByTestId("save-state")).toHaveAttribute("data-state", "synced");
+  await expect(await editorBody(page)).toContainText("另一个窗口确认的新正文");
+  await (await editorBody(page)).click(); await page.keyboard.type("\n载入后继续编辑。");
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect(page.getByTestId("save-state")).toHaveAttribute("data-state", "synced");
+  expect((await (await page.request.get(endpoint)).json()).data.draft.version).toBe(current.version + 1);
+});
+
+test("B2 a copied tab has a distinct live session and cannot overwrite the original local copy", async ({ page }) => {
+  test.slow();
+  await registerThroughUi(page, { nickname: "复制窗口成员", password });
+  await page.goto("/editor/new");
+  await page.getByLabel("文章标题").fill("复制窗口");
+  await (await editorBody(page)).click(); await page.keyboard.type("已保存的正文。");
+  await expect(page.getByTestId("save-state")).toHaveAttribute("data-state", "synced");
+  await expect(page).toHaveURL(/\/editor\/[0-9a-f-]{36}$/);
+  const draftUrl = page.url(), draftId = new URL(draftUrl).pathname.split("/").at(-1)!;
+  await blockDraftWrites(page);
+  await (await editorBody(page)).click(); await page.keyboard.type("\n原窗口本地文字。");
+  await expect.poll(async () => (await copiesFor(page, draftId)).some((copy) => copy.unsynced && copy.markdown.includes("原窗口本地文字"))).toBe(true);
+  const storage = await page.evaluate(() => Object.fromEntries(Object.keys(sessionStorage).map((key) => [key, sessionStorage.getItem(key)!])));
+  const firstId = storage["bb-editor-session"];
+  const second = await page.context().newPage();
+  try {
+    await second.addInitScript((items) => { for (const [key, value] of Object.entries(items)) sessionStorage.setItem(key, value); }, storage);
+    await blockDraftWrites(second);
+    await second.goto(draftUrl);
+    const recovery = second.getByRole("dialog", { name: "本地恢复" });
+    await expect(recovery).toBeVisible(); await recovery.getByRole("button", { name: "稍后处理" }).click();
+    expect(await second.evaluate(() => sessionStorage.getItem("bb-editor-session"))).not.toBe(firstId);
+    await (await editorBody(second)).click(); await second.keyboard.type("\n复制窗口本地文字。");
+    await expect.poll(async () => {
+      const copies = await copiesFor(second, draftId);
+      return copies.some((copy) => copy.sessionId === firstId && copy.markdown.includes("原窗口本地文字")) && copies.some((copy) => copy.sessionId !== firstId && copy.markdown.includes("复制窗口本地文字"));
+    }).toBe(true);
+  } finally { await second.close(); }
 });
 
 test("B2 image insertion and draft export use controlled media", async ({ page }) => {
