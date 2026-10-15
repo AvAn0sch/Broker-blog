@@ -1,5 +1,5 @@
 export type EditorSaveState = "synced" | "unsynced" | "saving" | "failed" | "conflict";
-export type DraftSnapshot = { title: string; markdown: string; summary: string };
+export type DraftSnapshot = { title: string; markdown: string; summary: string; tagIds?: string[] };
 export type SavePayload = DraftSnapshot & { revision: number; baseVersion: number };
 export type BackupPayload = SavePayload & { unsynced: boolean };
 export type SaveOutcome = { ok: true; version: number } | { ok: false; kind: "conflict" | "failure" };
@@ -35,6 +35,7 @@ export function createSaveScheduler(options: {
   let version = options.initialVersion;
   let blocked = false;
   let saving = false;
+  let activeSave: Promise<void> = Promise.resolve();
   let queued = false;
   let destroyed = false;
   let generation = 0;
@@ -59,7 +60,13 @@ export function createSaveScheduler(options: {
     return backupQueue;
   }
 
-  async function runSave(reason: "idle" | "max" | "manual"): Promise<void> {
+  function runSave(reason: "idle" | "max" | "manual"): Promise<void> {
+    if (saving) { queued = true; return activeSave; }
+    activeSave = performSave(reason);
+    return activeSave;
+  }
+
+  async function performSave(reason: "idle" | "max" | "manual"): Promise<void> {
     if (blocked || destroyed) return;
     if (saving) { queued = true; return; }
     const target = revision;
@@ -103,6 +110,15 @@ export function createSaveScheduler(options: {
       if (maxTimer === undefined) maxTimer = timers.setTimeout(() => { maxTimer = undefined; void runSave("max"); }, options.cadence.maxSaveMs);
     },
     saveNow: () => runSave("manual"),
+    async flush() {
+      // An in-flight request may only confirm an older revision. Await subsequent writes too.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await runSave("manual");
+        if (destroyed || blocked || state === "failed") return null;
+        if (state === "synced" && savedRevision === revision) return { version, revision };
+      }
+      return null;
+    },
     backupNow: runBackup,
     /** 用户选择载入服务器版本：本地文本被替换，调度从该版本重新开始。 */
     adoptServer(nextVersion: number) {

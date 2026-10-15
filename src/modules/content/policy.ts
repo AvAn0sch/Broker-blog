@@ -9,14 +9,21 @@ export const contentPolicy = {
   autosave: { localBackupMs: 1_000, idleSaveMs: 3_000, maxSaveMs: 30_000 },
 };
 
+export const codePointLength = (value: string) => Array.from(value).length;
+const boundedText = (max: number) => z.string().refine((value) => codePointLength(value) <= max, `最多 ${max} 个字符。`);
+export const tagIdsSchema = z.array(z.uuid()).max(3).refine((ids) => new Set(ids).size === ids.length, "标签不能重复。");
+
 export const draftContentSchema = z.strictObject({
-  title: z.string().max(contentPolicy.title.max),
-  markdown: z.string().max(contentPolicy.markdown.max),
-  summary: z.string().max(contentPolicy.summary.max),
+  title: boundedText(contentPolicy.title.max),
+  markdown: boundedText(contentPolicy.markdown.max),
+  summary: boundedText(contentPolicy.summary.max),
+  tagIds: tagIdsSchema.optional(),
 });
 
 export const draftSaveSchema = z.strictObject({ baseDraftVersion: z.number().int().positive(), ...draftContentSchema.shape });
 export const draftCreateSchema = draftContentSchema.partial();
+export const publishSchema = z.strictObject({ stateVersion: z.number().int().positive(), draftVersion: z.number().int().positive() });
+export const deleteArticleSchema = z.strictObject({ stateVersion: z.number().int().positive() });
 
 /** 草稿中引用的受控媒体 URL；发布与送审时再强校验 ready 与归属。 */
 export function extractMediaIds(markdown: string): string[] {

@@ -117,7 +117,7 @@ export function mediaService(options: { pool: Pool; secret: string; root: string
     const unique = [...new Set(mediaIds)];
     if (!unique.length) return;
     const rows = (await tx.client.query<{ id: string; owner_id: string; status: MediaStatus }>(
-      "SELECT id,owner_id,status FROM media WHERE id = ANY($1::uuid[]) FOR NO KEY UPDATE", [unique])).rows;
+      "SELECT id,owner_id,status FROM media WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE", [unique])).rows;
     if (rows.length !== unique.length) throw new AppError("MEDIA_NOT_FOUND", 400, "图片不存在。");
     for (const row of rows) {
       if (row.owner_id !== actorId) throw new AppError("MEDIA_FORBIDDEN", 403, "不能引用他人的图片。");

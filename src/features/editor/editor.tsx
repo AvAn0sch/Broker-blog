@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { contentPolicy } from "@/modules/content/policy";
+import { contentPolicy, draftContentSchema, codePointLength } from "@/modules/content/policy";
+import { suggestedSummary } from "@/modules/content/markdown";
+import { PublishDialog, type EditorTag, type PublishConfirmation } from "./publish-dialog";
 import { CodeEditor, type CodeEditorHandle } from "./code-editor";
 import { claimEditorSession, tempDraftId, type EditorSession } from "./editor-session";
 import { backupId, createBackupStore, type BackupRecord } from "./local-backup";
 import { Markdown } from "./markdown";
 import { createSaveScheduler, type EditorSaveState, type SaveOutcome, type SavePayload } from "./save-scheduler";
 
-export type DraftView = { articleId: string; version: number; title: string; markdown: string; summary: string };
+export type DraftView = { articleId: string; version: number; title: string; markdown: string; summary: string; tagIds?: string[]; stateVersion?: number; status?: string };
 
 const STATE_LABEL: Record<EditorSaveState, string> = {
   synced: "✓ 已同步服务器",
@@ -31,10 +33,16 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
   const [copies, setCopies] = useState<BackupRecord[]>([]);
   const [showRecovery, setShowRecovery] = useState(false);
   const [pane, setPane] = useState<"edit" | "preview">("edit");
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [summaryValue, setSummaryValue] = useState(draft?.summary ?? "");
+  const [selectedTags, setSelectedTags] = useState<string[]>(draft?.tagIds ?? []);
+  const [tags, setTags] = useState<EditorTag[]>([]);
+  const [articleStatus, setArticleStatus] = useState(draft?.status ?? "draft");
   const pendingInput = useRef(false);
 
   const latest = useRef({ title: draft?.title ?? "", markdown: draft?.markdown ?? "" });
   const summary = useRef(draft?.summary ?? "");
+  const tagIds = useRef(draft?.tagIds ?? []);
   const article = useRef<string | null>(draft?.articleId ?? null);
   const session = useRef("");
   const draftKey = useRef(draft?.articleId ?? "");
@@ -87,7 +95,8 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
   }, [draft?.articleId, store, userId]);
 
   const performSave = useCallback(async (payload: SavePayload): Promise<SaveOutcome> => {
-    const body = { title: payload.title, markdown: payload.markdown, summary: payload.summary };
+    const body = { title: payload.title, markdown: payload.markdown, summary: payload.summary, tagIds: payload.tagIds ?? [] };
+    if (!draftContentSchema.safeParse(body).success) { setNotice("标题最多 100 字符、正文最多 100000 字符、摘要最多 200 字符，标签最多 3 个。请修改后保存。"); return { ok: false, kind: "failure" }; }
     const headers = { "Content-Type": "application/json", "X-CSRF-Token": csrf.current, "X-Idempotency-Key": keyFor(payload) };
     try {
       if (!article.current) {
@@ -128,12 +137,12 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
     const instance = createSaveScheduler({
       initialVersion: lastVersion.current,
       cadence: contentPolicy.autosave,
-      snapshot: () => ({ title: latest.current.title, markdown: latest.current.markdown, summary: summary.current }),
+      snapshot: () => ({ title: latest.current.title, markdown: latest.current.markdown, summary: summary.current, tagIds: [...tagIds.current] }),
       backup: async (payload) => {
         if (!session.current || !draftKey.current) throw new Error("Editor session is not ready.");
         await store.put({
           id: backupId(userId, draftKey.current, session.current), userId, draftId: draftKey.current, sessionId: session.current,
-          title: payload.title, markdown: payload.markdown, summary: payload.summary,
+          title: payload.title, markdown: payload.markdown, summary: payload.summary, tagIds: payload.tagIds,
           baseVersion: payload.baseVersion, unsynced: payload.unsynced, savedAt: Date.now(), origin: window.location.pathname,
         });
       },
@@ -198,6 +207,8 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
       setTitle(server.title); setMarkdown(server.markdown);
       latest.current = { title: server.title, markdown: server.markdown };
       summary.current = server.summary;
+      setSummaryValue(server.summary); tagIds.current = server.tagIds ?? []; setSelectedTags(tagIds.current);
+      setArticleStatus(server.status ?? "draft");
       instance.adoptServer(server.version);
       keys.current.clear();
       setNotice("已载入服务器版本（v" + server.version + "）。本地修改仍保留在本地副本中，可随时导出。");
@@ -209,6 +220,7 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
     setTitle(copy.title); setMarkdown(copy.markdown);
     latest.current = { title: copy.title, markdown: copy.markdown };
     summary.current = copy.summary;
+    setSummaryValue(copy.summary); tagIds.current = copy.tagIds ?? []; setSelectedTags(tagIds.current);
     setShowRecovery(false);
     setNotice(`已恢复 ${new Date(copy.savedAt).toLocaleString("zh-CN")} 的本地副本；保存后会写回服务器。`);
     scheduler.current?.input();
@@ -235,6 +247,41 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
     catch { setNotice("复制失败，请使用“导出草稿”。"); }
   }
 
+  async function openPublication() {
+    try {
+      const response = await fetch("/api/v1/tags", { cache: "no-store" });
+      if (!response.ok) throw new Error();
+      setTags((await response.json()).data.tags);
+      if (!summary.current.trim()) {
+        summary.current = suggestedSummary(latest.current.markdown); setSummaryValue(summary.current); scheduler.current?.input();
+      }
+      setPublishOpen(true);
+    } catch { setNotice("无法读取发布配置，请稍后重试。"); }
+  }
+
+  async function preparePublication(): Promise<PublishConfirmation> {
+    const instance = scheduler.current;
+    if (!instance) throw new Error("编辑器尚未就绪，请重试。");
+    const saved = await instance.flush();
+    if (!saved || !article.current) throw new Error("草稿尚未成功保存或存在版本冲突，请取消发布并处理保存状态。");
+    const response = await fetch(`/api/v1/articles/${article.current}/draft`, { cache: "no-store" });
+    if (!response.ok) throw new Error("无法确认服务器草稿，请重试。");
+    const server: DraftView = (await response.json()).data.draft;
+    if (server.version !== saved.version || saved.revision !== instance.revision() || instance.state() !== "synced") throw new Error("确认期间草稿已变化，请重新保存并确认版本。");
+    return { ...saved, stateVersion: server.stateVersion! };
+  }
+
+  async function publishConfirmed(confirmation: PublishConfirmation, key: string) {
+    const instance = scheduler.current;
+    if (!article.current || !instance || instance.revision() !== confirmation.revision || instance.version() !== confirmation.version || instance.state() !== "synced") throw new Error("当前输入已变化，请返回配置重新保存并确认。");
+    const response = await fetch(`/api/v1/articles/${article.current}/publish`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.current, "X-Idempotency-Key": key }, body: JSON.stringify({ stateVersion: confirmation.stateVersion, draftVersion: confirmation.version }) });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(result?.error?.message ?? "发布未完成，请重试。");
+    setPublishOpen(false); setArticleStatus("published");
+    if (instance.revision() !== confirmation.revision) { setNotice("已发布确认的版本，后续输入仍保留在工作草稿中。"); return; }
+    window.location.assign(`/articles/${article.current}`);
+  }
+
   return (
     <div className="editor-page">
       <div className="editor-toolbar">
@@ -248,7 +295,7 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
           <button type="button" onClick={exportDraft}>导出草稿</button>
           <button type="button" onClick={() => void copyDraft()}>复制正文</button>
           {saveState === "conflict" && <button type="button" className="primary" onClick={() => void loadServerVersion()}>载入服务器版本</button>}
-          <button type="button" className="button primary" disabled title="发布将在内容发布阶段开放">发布文章</button>
+          <button type="button" className="button primary" disabled={articleStatus === "taken_down" || articleStatus === "deleted"} onClick={() => void openPublication()}>{articleStatus === "published" ? "更新文章" : "发布文章"}</button>
         </div>
       </div>
       <input
@@ -257,14 +304,14 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
       />
       {uploadNote && <p className="editor-note" role="status">{uploadNote}</p>}
       {notice && <p className="notice" role="status">{notice}</p>}
-      <input className="title-input" aria-label="文章标题" maxLength={contentPolicy.title.max} placeholder="请输入文章标题" value={title} onChange={(event) => changeTitle(event.target.value)} />
+      <input className="title-input" aria-label="文章标题" placeholder="请输入文章标题" value={title} onChange={(event) => changeTitle(event.target.value)} />
       <div className="mobile-preview-tabs">
         <button type="button" aria-pressed={pane === "edit"} onClick={() => setPane("edit")}>编辑</button>
         <button type="button" aria-pressed={pane === "preview"} onClick={() => setPane("preview")}>预览</button>
       </div>
       <div className={`editor-grid pane-${pane}`}>
         <section className="editor-pane source-pane" aria-label="Markdown 编辑">
-          <div className="editor-pane-head"><strong>Markdown</strong><span className="muted">{markdown.length} 字符</span></div>
+          <div className="editor-pane-head"><strong>Markdown</strong><span className="muted">{codePointLength(markdown)} 字符</span></div>
           <CodeEditor value={markdown} onChange={changeMarkdown} label="Markdown 正文" handleRef={editor} />
         </section>
         <section className="editor-pane preview-pane" aria-label="阅读预览" data-testid="editor-preview">
@@ -273,7 +320,7 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
         </section>
       </div>
       <p className="editor-note">
-        草稿只在你的账号下可见：{articleId ? `服务器草稿 ${articleId.slice(0, 8)}…` : "尚未创建服务器草稿（首次自动保存时创建）"}。发布、摘要与标签配置将在内容发布阶段开放。
+        工作草稿只在你的账号下可见：{articleId ? `服务器草稿 ${articleId.slice(0, 8)}…` : "尚未创建服务器草稿（首次自动保存时创建）"}。保存修改不会自动更新公开文章。
       </p>
       {showRecovery && (
         <div className="recovery" role="dialog" aria-label="本地恢复">
@@ -291,6 +338,10 @@ export function DraftEditor({ mode, userId, draft }: { mode: "new" | "draft"; us
           <button type="button" onClick={() => setShowRecovery(false)}>稍后处理</button>
         </div>
       )}
+      {publishOpen && <PublishDialog summary={summaryValue} tagIds={selectedTags} tags={tags}
+        onSummary={(value) => { summary.current = value; setSummaryValue(value); scheduler.current?.input(); }}
+        onTags={(value) => { tagIds.current = value; setSelectedTags(value); scheduler.current?.input(); }}
+        onPrepare={preparePublication} onPublish={publishConfirmed} onClose={() => setPublishOpen(false)} />}
     </div>
   );
 }

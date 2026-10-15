@@ -1,6 +1,7 @@
 export type BackupRecord = {
   id: string; userId: string; draftId: string; sessionId: string;
   title: string; markdown: string; summary: string;
+  tagIds?: string[];
   baseVersion: number; unsynced: boolean; savedAt: number; origin: string;
 };
 
