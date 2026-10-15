@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { getEnvironment } from "../../config/env";
 import { getPool } from "../../infrastructure/db/client";
 import { withTransaction, type Transaction } from "../../infrastructure/db/transaction";
@@ -38,6 +39,15 @@ export async function establishSession(session: { token: string; expiresAt: Date
   jar.set(cookieNames().browser, secretToken(), { ...cookieOptions(), maxAge: authPolicy.browserSeconds });
 }
 export async function clearSession() { (await cookies()).set(cookieNames().session, "", { ...cookieOptions(), maxAge: 0 }); }
+
+/** Server pages gate read-only routes on the live session; write APIs must still use authenticatedTransaction. */
+export async function pageUser(options: { returnTo: string; banned?: "view" | "blocked" }): Promise<UserDto> {
+  const token = await sessionToken();
+  const user = await identity().readSession(token);
+  if (!user) redirect(`/login?returnTo=${encodeURIComponent(options.returnTo)}`);
+  if (options.banned === "blocked" && user.status === "banned") redirect("/account?notice=banned-write");
+  return user;
+}
 
 /** Future business routes reuse this gate so authorization is inside their write transaction. */
 export async function authenticatedTransaction<T>(request: Request, requirements: { write?: boolean; admin?: boolean }, work: (tx: Transaction, actor: UserDto) => Promise<T>) {

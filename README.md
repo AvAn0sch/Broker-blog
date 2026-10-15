@@ -1,6 +1,6 @@
 # Broker Blog
 
-技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境、A2 数据库/事务/任务基础与 A3 账号认证；下一步是 A4 页面导航与角色入口。
+技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境、A2 数据库/事务/任务基础、A3 账号认证与 A4 页面骨架及角色入口；下一步是 B1 草稿与受控媒体。
 
 ## Windows 开发
 
@@ -48,7 +48,7 @@ pnpm verify:foundation
 pnpm verify:auth
 ```
 
-`check` 生成路由类型后执行类型和规则检查；三个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。认证测试关闭敏感轨迹与页面快照，预览截图遮罩验证码。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
+`check` 生成路由类型后执行类型和规则检查；三个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。骨架用例 `tests/e2e/shell.spec.ts` 覆盖游客、成员、封禁与管理员入口，账号 fixtures 在 `tests/fixtures/`。认证测试关闭敏感轨迹与页面快照，预览截图遮罩验证码。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
 
 `/api/health/live` 检查 Web 存活；`/api/health/ready` 检查迁移后的基础表和图片目录，失败返回 503。`/api/v1/health` 使用统一的 data/error/requestId 协议。浏览器安装使用 Playwright 锁定版本对应的 Chromium，保存在 `.local/playwright`。
 
@@ -80,6 +80,6 @@ docker tag mirror.gcr.io/library/postgres:17.11-bookworm postgres:17.11-bookworm
 
 ## 项目结构
 
-`src/app` 为页面与接口，`src/config` 为环境校验，`src/infrastructure/db` 为数据库入口，`src/worker` 为独立进程，`scripts` 为跨平台工具，`tests` 为规则/接口/浏览器验证，`deploy` 为 Linux 容器配置。`prototype` 保留独立静态参考稿。
+`src/app` 为页面与接口，`src/config` 为环境校验，`src/infrastructure/db` 为数据库入口，`src/worker` 为独立进程，`scripts` 为跨平台工具，`tests` 为规则/接口/浏览器验证与基础 fixtures，`deploy` 为 Linux 容器配置。`prototype` 保留独立静态参考稿。
 
 版本来源与本机验证记录见 [开发环境说明](docs/开发环境说明.md)。每次完成改动需创建 Git commit。

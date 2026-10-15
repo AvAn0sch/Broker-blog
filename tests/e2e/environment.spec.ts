@@ -8,7 +8,7 @@ test("ENV-01 / UI-01 environment entry is readable and keyboard accessible", asy
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "b· broker blog" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("link", { name: "登录", exact: true })).toBeFocused();
+  await expect(page.getByLabel("搜索文章", { exact: true })).toBeFocused();
   const health = page.getByRole("link", { name: "检查服务连接 →" });
   await health.focus();
   await page.keyboard.press("Enter");

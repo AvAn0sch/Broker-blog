@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-export function LogoutButton() {
+export function LogoutButton({ variant = "standalone" }: { variant?: "standalone" | "menu" }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   async function logout() {
@@ -14,5 +14,11 @@ export function LogoutButton() {
       window.location.assign("/login");
     } catch { setError("退出未完成，请重试。"); setPending(false); }
   }
-  return <div><button className="button secondary" type="button" disabled={pending} onClick={() => void logout()}>{pending ? "正在退出…" : "退出登录"}</button>{error && <p role="alert" className="form-error">{error}</p>}</div>;
+  const failure = error && <p role="alert" className="form-error">{error}</p>;
+  return (
+    <div>
+      <button className={variant === "menu" ? "menu-logout" : "button secondary"} type="button" disabled={pending} onClick={() => void logout()}>{pending ? "正在退出…" : "退出登录"}</button>
+      {failure}
+    </div>
+  );
 }
