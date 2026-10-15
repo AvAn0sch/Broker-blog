@@ -22,7 +22,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           <UserMenu
             userId={user.id}
             nickname={user.nickname}
-            initial={Array.from(user.nickname.trim())[0] ?? "·"}
+            avatarMediaId={user.avatarMediaId}
             statusNote={user.status === "banned" ? "已封禁 · 仅可只读" : user.role === "admin" ? "管理员" : "社区成员"}
             entries={userMenuEntries(user)}
           />

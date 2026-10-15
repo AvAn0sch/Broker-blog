@@ -10,11 +10,11 @@ import type { z } from "zod";
 import { csrfToken, digest, equals, secretToken, tokenIsValid } from "./security";
 import { limitAuthentication } from "./rate-limit";
 
-export type UserDto = { id: string; email: string; nickname: string; role: "user" | "admin"; status: "normal" | "banned" };
-type UserRow = { id: string; email_normalized: string; nickname: string; role: UserDto["role"]; status: UserDto["status"] };
+export type UserDto = { id: string; email: string; nickname: string; bio: string; avatarMediaId: string | null; role: "user" | "admin"; status: "normal" | "banned" };
+type UserRow = { id: string; email_normalized: string; nickname: string; bio: string; avatar_media_id: string | null; role: UserDto["role"]; status: UserDto["status"] };
 type IdentityOptions = { pool: Pool; sessionSecret: string; captchaSecret: string; clock?: Clock };
 type Purpose = z.infer<typeof purposeSchema>;
-function userDto(row: UserRow): UserDto { return { id: row.id, email: row.email_normalized, nickname: row.nickname, role: row.role, status: row.status }; }
+function userDto(row: UserRow): UserDto { return { id: row.id, email: row.email_normalized, nickname: row.nickname, bio: row.bio, avatarMediaId: row.avatar_media_id, role: row.role, status: row.status }; }
 const unauthenticated = () => new AppError("UNAUTHENTICATED", 401, "登录已过期，请重新登录。");
 
 export function identityService(options: IdentityOptions) {
@@ -25,7 +25,7 @@ export function identityService(options: IdentityOptions) {
 
   async function readSession(token: string | undefined): Promise<UserDto | null> {
     if (!tokenIsValid(token)) return null;
-    const result = await pool.query(`SELECT u.id,u.email_normalized,u.nickname,u.role,u.status FROM sessions s JOIN users u ON u.id=s.user_id
+    const result = await pool.query(`SELECT u.id,u.email_normalized,u.nickname,u.bio,u.avatar_media_id,u.role,u.status FROM sessions s JOIN users u ON u.id=s.user_id
       WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>$2`, [sessionHash(token), clock.now()]);
     return result.rowCount ? userDto(result.rows[0]) : null;
   }
@@ -35,7 +35,7 @@ export function identityService(options: IdentityOptions) {
     if (!tokenIsValid(token)) throw unauthenticated();
     const reference = await tx.client.query("SELECT user_id FROM sessions WHERE token_hash=$1", [sessionHash(token)]);
     if (!reference.rowCount) throw unauthenticated();
-    const user = await tx.client.query<UserRow>("SELECT id,email_normalized,nickname,role,status FROM users WHERE id=$1 FOR NO KEY UPDATE", [reference.rows[0].user_id]);
+    const user = await tx.client.query<UserRow>("SELECT id,email_normalized,nickname,bio,avatar_media_id,role,status FROM users WHERE id=$1 FOR NO KEY UPDATE", [reference.rows[0].user_id]);
     const session = await tx.client.query("SELECT csrf_hash FROM sessions WHERE token_hash=$1 AND revoked_at IS NULL AND expires_at>$2 FOR UPDATE", [sessionHash(token), clock.now()]);
     if (!user.rowCount || !session.rowCount) throw unauthenticated();
     if (requirements.write && (!requirements.csrf || !equals(digest(sessionSecret, "csrf-token", requirements.csrf), session.rows[0].csrf_hash))) throw new AppError("CSRF_REJECTED", 403, "页面已过期，请刷新后重试。");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { userMenuEntries } from "../../src/modules/identity/navigation";
 import type { UserDto } from "../../src/modules/identity/service";
 
-const account = (patch: Partial<UserDto>): UserDto => ({ id: "00000000-0000-4000-8000-000000000001", email: "member@example.test", nickname: "成员", role: "user", status: "normal", ...patch });
+const account = (patch: Partial<UserDto>): UserDto => ({ id: "00000000-0000-4000-8000-000000000001", email: "member@example.test", nickname: "成员", bio: "", avatarMediaId: null, role: "user", status: "normal", ...patch });
 
 describe("A4 user menu entries follow the product baseline", () => {
   it("normal member gets the personal entries including settings", () => {

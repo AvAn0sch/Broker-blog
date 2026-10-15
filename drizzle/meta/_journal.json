@@ -29,6 +29,13 @@
       "when": 1792039735691,
       "tag": "0003_b1_media_readiness",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792053683623,
+      "tag": "0004_b4_featured_articles",
+      "breakpoints": true
     }
   ]
 }

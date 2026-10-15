@@ -1,6 +1,6 @@
 # Broker Blog
 
-技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境、A2 数据库/事务/任务基础、A3 账号认证、A4 页面骨架、B1 受控媒体、B2 编辑器与本地恢复及 B3 发布与内容管理；下一步是 B4 内容发现与个人资料。
+技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境、A2 数据库/事务/任务基础、A3 账号认证、A4 页面骨架、B1 受控媒体、B2 编辑器与本地恢复、B3 发布与内容管理及 B4 首页分发与个人资料；下一步是 C1 检索与搜索。
 
 ## Windows 开发
 
@@ -35,6 +35,8 @@ pnpm dev
 另开终端运行 `pnpm worker`，当前 worker 消费持久任务并更新心跳；可以先 `pnpm jobs:probe` 再用 `pnpm worker:once` 验证单轮消费，`pnpm jobs:status` 查询结果。停止网页和 worker 使用 Ctrl+C；数据库用 `pnpm db:stop` 安全停止，数据保留。
 
 图片通过受控接口读写：`POST /api/v1/media` 接收原始字节（需登录、精确 Origin 与会话 CSRF，单张上限 5 MiB），`GET /api/v1/media/:id` 每次按当前引用判定读取权限；文件保存在 `MEDIA_ROOT`（位于 `public` 之外）。上传状态机、失败恢复与授权规则见 [B1 实施说明](docs/B1草稿与受控媒体实施说明.md)。运维脚本：`pnpm media:recover`、`pnpm media:cleanup`、`pnpm media:verify <媒体UUID>`。
+
+阅读与分发：首页 `/` 按「精选文章/最新发布」分发公开内容（精选为空自动回退最新，空库展示空态与写作入口），`/tags` 为标签总览（含真实公开文章数与停用标记）、`/tags/:slug` 为该标签的公开文章，作者主页 `/users/:id` 展示公开资料与已发布文章；列表使用稳定游标分页（最新按首次发布时间与 ID、精选按顺序与文章 ID），只读取公开版本。公开读取接口为 `GET /api/v1/articles`、`GET /api/v1/tags/:slug`、`GET /api/v1/users/:id`；资料编辑在 `/settings/profile`，接口为 `PATCH /api/v1/me/profile`（昵称/简介字段边界、头像必须是本人已完成上传的媒体、未设置头像时显示昵称首字）。接口、如实边界与验证清单见 [B4 实施说明](docs/B4首页分发与资料实施说明.md)（B4 用例尚未执行）；发布、修订与删除流程见 [B3 实施说明](docs/B3发布与内容管理实施说明.md)。
 
 写作入口是真实编辑器（`/editor/new`、`/editor/:id`）：CodeMirror 6 编辑 Markdown、统一预览（与公开正文共用渲染规则、禁用原始 HTML、链接协议白名单）、图片插入、草稿版本化保存与本地恢复。`POST /api/v1/articles` 幂等创建私有草稿，`GET|PATCH /api/v1/articles/:id/draft` 读取与保存（携带基础版本，旧窗口不能覆盖新文本）。保存节奏与副本隔离见 [B2 实施说明](docs/B2编辑器与本地恢复实施说明.md)。
 
@@ -86,6 +88,6 @@ docker tag mirror.gcr.io/library/postgres:17.11-bookworm postgres:17.11-bookworm
 
 ## 项目结构
 
-`src/app` 为页面与接口，`src/config` 为环境校验，`src/features/editor` 为编辑器与本地恢复，`src/infrastructure/db` 为数据库入口，`src/infrastructure/storage` 为受控媒体存储，`src/modules/media` 与 `src/modules/content` 为媒体与草稿服务，`src/worker` 为独立进程，`scripts` 为跨平台工具，`tests` 为规则/接口/浏览器验证与基础 fixtures，`deploy` 为 Linux 容器配置。`prototype` 保留独立静态参考稿。
+`src/app` 为页面与接口，`src/config` 为环境校验，`src/features/editor` 为编辑器与本地恢复，`src/features/profile` 为资料编辑表单，`src/infrastructure/db` 为数据库入口，`src/infrastructure/storage` 为受控媒体存储，`src/modules/media`、`src/modules/content` 与 `src/modules/discovery` 为媒体、草稿/公开版本与公开分发服务，`src/worker` 为独立进程，`scripts` 为跨平台工具，`tests` 为规则/接口/浏览器验证与基础 fixtures，`deploy` 为 Linux 容器配置。`prototype` 保留独立静态参考稿。
 
 版本来源与本机验证记录见 [开发环境说明](docs/开发环境说明.md)。每次完成改动需创建 Git commit。

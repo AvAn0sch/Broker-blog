@@ -46,7 +46,8 @@ test("A4 / UI-01 guest shell exposes discovery, search, compose and sign-in entr
   await expect(page).toHaveURL(/\/tags$/);
   await expect(topics).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "探索标签" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "返回发现文章" })).toBeVisible();
+  // 标签总览：未预置标签时展示明确空态，有标签时展示真实公开文章数。
+  await expect(page.getByText(/还没有可用标签|篇公开文章/).first()).toBeVisible();
 
   // Header search works by keyboard and lands on the honest search page.
   await page.goto("/");

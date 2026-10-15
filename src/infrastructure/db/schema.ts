@@ -42,6 +42,12 @@ export const articlePublications = pgTable("article_publications", {
 
 export const tags = pgTable("tags", { id: id(), slug: varchar("slug", { length: 64 }).notNull(), name: varchar("name", { length: 40 }).notNull(), enabled: boolean("enabled").notNull().default(true) }, (t) => [uniqueIndex("tags_slug_unique").on(t.slug)]);
 
+/** 精选由治理阶段写入；公开读取只展示仍为 published 的文章，按 position、article_id 稳定排序。 */
+export const featuredArticles = pgTable("featured_articles", {
+  articleId: uuid("article_id").primaryKey().references(() => articles.id), position: integer("position").notNull(),
+  selectedBy: uuid("selected_by").notNull().references(() => users.id), createdAt: createdAt(),
+}, (t) => [index("featured_order_idx").on(t.position, t.articleId), check("featured_position_check", sql`${t.position} >= 0`)]);
+
 export const media = pgTable("media", {
   id: id(), ownerId: uuid("owner_id").notNull().references((): AnyPgColumn => users.id), storageKey: text("storage_key").notNull(), mime: text("mime").notNull(), size: integer("size").notNull(), status: text("status").notNull().default("staging"),
   checksum: varchar("checksum", { length: 64 }), uploadLeaseUntil: timestamp("upload_lease_until", { withTimezone: true }), failureCode: varchar("failure_code", { length: 64 }),

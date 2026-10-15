@@ -3,13 +3,20 @@ import { redirect } from "next/navigation";
 import { getEnvironment } from "../../config/env";
 import { getPool } from "../../infrastructure/db/client";
 import { withTransaction, type Transaction } from "../../infrastructure/db/transaction";
+import { media } from "../media/http";
 import { csrfToken, requireOrigin, secretToken, tokenIsValid, requireAnonymousCsrf } from "./security";
 import { identityService, type UserDto } from "./service";
+import { profileService } from "./profile";
 import { authPolicy } from "./policy";
 
 export function identity() {
   const env = getEnvironment();
   return identityService({ pool: getPool(), sessionSecret: env.SESSION_SECRET, captchaSecret: env.CAPTCHA_SECRET });
+}
+
+/** 本人资料读写：头像引用复用媒体的归属与就绪校验。 */
+export function profile() {
+  return profileService({ pool: getPool(), media: media() });
 }
 export function cookieNames() {
   const prefix = new URL(getEnvironment().APP_ORIGIN).protocol === "https:" ? "__Host-" : "";
