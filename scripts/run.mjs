@@ -20,6 +20,7 @@ const actions = {
   seed: ["node_modules/tsx/dist/cli.mjs", ["scripts/seed.mjs"]],
   accounts: ["node_modules/tsx/dist/cli.mjs", ["scripts/accounts.mjs", ...process.argv.slice(3)]],
   jobs: ["node_modules/tsx/dist/cli.mjs", ["scripts/jobs.mjs", ...process.argv.slice(3)]],
+  media: ["node_modules/tsx/dist/cli.mjs", ["scripts/media.mjs", ...process.argv.slice(3)]],
   "test-api": ["node_modules/tsx/dist/cli.mjs", ["scripts/test-run.mjs", "--project=api"]],
   "test-e2e": ["node_modules/tsx/dist/cli.mjs", ["scripts/test-run.mjs", "--project=desktop", "--project=mobile"]],
   "test-environment": ["node_modules/tsx/dist/cli.mjs", ["scripts/test-run.mjs"]],

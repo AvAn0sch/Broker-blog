@@ -22,6 +22,13 @@
       "when": 1792031898367,
       "tag": "0002_a3_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792039735691,
+      "tag": "0003_b1_media_readiness",
+      "breakpoints": true
     }
   ]
 }

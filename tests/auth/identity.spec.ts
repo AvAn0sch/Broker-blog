@@ -26,7 +26,14 @@ test.beforeAll(async () => {
   pool = createPool(process.env.DATABASE_URL!, process.env.DATABASE_SCHEMA!);
   fixtureEmail = `fixture-${process.env.TEST_RUN_ID}@example.test`; administratorEmail = `admin-${process.env.TEST_RUN_ID}@example.test`;
   await pool.query("INSERT INTO users (email_normalized,password_hash,nickname) VALUES ($1,$2,'基础账号') ON CONFLICT DO NOTHING", [fixtureEmail, await hashPassword(password)]);
-  if (!(await pool.query("SELECT 1 FROM users WHERE email_normalized=$1", [administratorEmail])).rowCount) await initializeAdministrator(pool, { email: administratorEmail, password, nickname: "本地管理员" });
+  if (!(await pool.query("SELECT 1 FROM users WHERE email_normalized=$1", [administratorEmail])).rowCount) {
+    try { await initializeAdministrator(pool, { email: administratorEmail, password, nickname: "本地管理员" }); }
+    catch (error) {
+      // 同一轮次的其他 spec 可能已初始化过管理员；此时直接补出本 spec 所需的管理员账号。
+      if ((error as { code?: string }).code !== "ADMIN_ALREADY_INITIALIZED") throw error;
+      await pool.query("INSERT INTO users (email_normalized,password_hash,nickname,role) VALUES ($1,$2,'本地管理员','admin') ON CONFLICT DO NOTHING", [administratorEmail, await hashPassword(password)]);
+    }
+  }
 });
 test.afterAll(async () => { await pool?.end(); });
 

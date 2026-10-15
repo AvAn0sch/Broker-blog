@@ -43,8 +43,13 @@ export const articlePublications = pgTable("article_publications", {
 export const tags = pgTable("tags", { id: id(), slug: varchar("slug", { length: 64 }).notNull(), name: varchar("name", { length: 40 }).notNull(), enabled: boolean("enabled").notNull().default(true) }, (t) => [uniqueIndex("tags_slug_unique").on(t.slug)]);
 
 export const media = pgTable("media", {
-  id: id(), ownerId: uuid("owner_id").notNull().references((): AnyPgColumn => users.id), storageKey: text("storage_key").notNull(), mime: text("mime").notNull(), size: integer("size").notNull(), status: text("status").notNull().default("staging"), createdAt: createdAt(),
-}, (t) => [uniqueIndex("media_storage_key_unique").on(t.storageKey), check("media_state_check", sql`${t.status} in ('staging','ready','failed')`), check("media_size_check", sql`${t.size} > 0 and ${t.size} <= 5242880`), check("media_mime_check", sql`${t.mime} in ('image/jpeg','image/png','image/webp')`)]);
+  id: id(), ownerId: uuid("owner_id").notNull().references((): AnyPgColumn => users.id), storageKey: text("storage_key").notNull(), mime: text("mime").notNull(), size: integer("size").notNull(), status: text("status").notNull().default("staging"),
+  checksum: varchar("checksum", { length: 64 }), uploadLeaseUntil: timestamp("upload_lease_until", { withTimezone: true }), failureCode: varchar("failure_code", { length: 64 }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(), createdAt: createdAt(),
+}, (t) => [uniqueIndex("media_storage_key_unique").on(t.storageKey), index("media_owner_order_idx").on(t.ownerId, t.createdAt), index("media_staging_lease_idx").on(t.uploadLeaseUntil).where(sql`${t.status} = 'staging'`),
+  check("media_state_check", sql`${t.status} in ('staging','ready','failed')`), check("media_size_check", sql`${t.size} > 0 and ${t.size} <= 5242880`), check("media_mime_check", sql`${t.mime} in ('image/jpeg','image/png','image/webp')`),
+  check("media_checksum_check", sql`${t.checksum} is null or ${t.checksum} ~ '^[0-9a-f]{64}$'`),
+  check("media_status_fields_check", sql`(${t.status} = 'staging' and ${t.uploadLeaseUntil} is not null and ${t.checksum} is null) or (${t.status} = 'ready' and ${t.uploadLeaseUntil} is null and ${t.checksum} is not null) or (${t.status} = 'failed' and ${t.uploadLeaseUntil} is null and ${t.checksum} is null and ${t.failureCode} is not null)`)]);
 
 export const reviewRequests = pgTable("review_requests", {
   id: id(), articleId: uuid("article_id").notNull().references(() => articles.id), sourceDraftVersion: integer("source_draft_version").notNull(), ...content(),
