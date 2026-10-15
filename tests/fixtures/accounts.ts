@@ -3,13 +3,17 @@ import { expect, type Page } from "@playwright/test";
 import { createPool } from "../../src/infrastructure/db/client";
 import { readTestCaptcha } from "../../src/infrastructure/testing/captcha";
 
-export async function answerCaptcha(page: Page) {
+async function waitForCaptcha(page: Page) {
   const image = page.getByTestId("captcha-image");
   // 表单自动刷新失败时图片不会出现：主动刷新一次，再在有界时间内等待。
   if (!(await image.isVisible().catch(() => false))) await page.getByRole("button", { name: "刷新验证码" }).click({ timeout: 10_000 }).catch(() => {});
   await expect(image).toBeVisible({ timeout: 15_000 });
   expect(await image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth === 228)).toBe(true);
-  const id = await image.getAttribute("data-challenge-id");
+}
+
+export async function answerCaptcha(page: Page) {
+  await waitForCaptcha(page);
+  const id = await page.getByTestId("captcha-image").getAttribute("data-challenge-id");
   if (!id) throw new Error("Challenge not loaded.");
   await page.getByLabel("图形验证码", { exact: true }).fill(await readTestCaptcha(id));
 }
@@ -38,7 +42,7 @@ async function settle(page: Page, pattern: RegExp, fallbackPath: string) {
 export async function registerThroughUi(page: Page, options: { nickname: string; password: string; email?: string; beforeSubmit?: (page: Page) => Promise<void> }) {
   const email = options.email ?? `${randomUUID()}@example.test`;
   await page.goto("/register");
-  await expect(page.getByTestId("captcha-image")).toBeVisible();
+  await waitForCaptcha(page);
   if (options.beforeSubmit) await options.beforeSubmit(page);
   await page.getByLabel("昵称", { exact: true }).fill(options.nickname);
   await page.getByLabel("邮箱", { exact: true }).fill(email);

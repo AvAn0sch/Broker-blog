@@ -20,6 +20,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         {composeVisible && <a className="button primary compose" href="/editor/new">＋ 写文章</a>}
         {user ? (
           <UserMenu
+            userId={user.id}
             nickname={user.nickname}
             initial={Array.from(user.nickname.trim())[0] ?? "·"}
             statusNote={user.status === "banned" ? "已封禁 · 仅可只读" : user.role === "admin" ? "管理员" : "社区成员"}

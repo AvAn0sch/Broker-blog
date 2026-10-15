@@ -15,9 +15,9 @@ export function requireAnonymousCsrf(secret: string, browser: string | undefined
   return browser;
 }
 
-export async function readJson(request: Request) {
+export async function readJson(request: Request, limit = 8192) {
   if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") throw new AppError("INVALID_REQUEST", 415, "请使用 JSON 提交表单。");
-  if (Number(request.headers.get("content-length")) > 8192) throw new AppError("REQUEST_TOO_LARGE", 413, "提交内容过长。");
+  if (Number(request.headers.get("content-length")) > limit) throw new AppError("REQUEST_TOO_LARGE", 413, "提交内容过长。");
   const reader = request.body?.getReader();
   if (!reader) throw new AppError("INVALID_REQUEST", 400, "请求内容为空。");
   const chunks: Uint8Array[] = []; let bytes = 0;
@@ -25,7 +25,7 @@ export async function readJson(request: Request) {
     while (true) {
       const part = await reader.read(); if (part.done) break;
       bytes += part.value.length;
-      if (bytes > 8192) { await reader.cancel(); throw new AppError("REQUEST_TOO_LARGE", 413, "提交内容过长。"); }
+      if (bytes > limit) { await reader.cancel(); throw new AppError("REQUEST_TOO_LARGE", 413, "提交内容过长。"); }
       chunks.push(part.value);
     }
     try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown; }

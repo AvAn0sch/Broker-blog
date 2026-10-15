@@ -4,14 +4,14 @@ import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from
 import type { MenuEntry } from "@/modules/identity/navigation";
 import { LogoutButton } from "./logout-button";
 
-type Props = { nickname: string; initial: string; statusNote: string; entries: MenuEntry[] };
+type Props = { userId: string; nickname: string; initial: string; statusNote: string; entries: MenuEntry[] };
 
 /**
  * 头像菜单（触屏与键盘，按架构基线不使用鼠标悬浮开关）：
  * 点击触发钮切换；ArrowDown 打开并聚焦首项；Escape 关闭并回到触发钮；
  * 焦点移出或点击菜单外区域时关闭。
  */
-export function UserMenu({ nickname, initial, statusNote, entries }: Props) {
+export function UserMenu({ userId, nickname, initial, statusNote, entries }: Props) {
   const [open, setOpen] = useState(false);
   const [focusFirst, setFocusFirst] = useState(false);
   const container = useRef<HTMLDivElement>(null);
@@ -66,7 +66,7 @@ export function UserMenu({ nickname, initial, statusNote, entries }: Props) {
           </a>
         ))}
         <div className="user-menu-divider" />
-        <LogoutButton variant="menu" />
+        <LogoutButton variant="menu" userId={userId} />
       </nav>
     </div>
   );

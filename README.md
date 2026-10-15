@@ -1,6 +1,6 @@
 # Broker Blog
 
-技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境、A2 数据库/事务/任务基础、A3 账号认证、A4 页面骨架及 B1 受控媒体；下一步是 B2 编辑器与本地恢复。
+技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境、A2 数据库/事务/任务基础、A3 账号认证、A4 页面骨架、B1 受控媒体及 B2 编辑器与本地恢复；下一步是 B3 发布与内容管理。
 
 ## Windows 开发
 
@@ -36,6 +36,8 @@ pnpm dev
 
 图片通过受控接口读写：`POST /api/v1/media` 接收原始字节（需登录、精确 Origin 与会话 CSRF，单张上限 5 MiB），`GET /api/v1/media/:id` 每次按当前引用判定读取权限；文件保存在 `MEDIA_ROOT`（位于 `public` 之外）。上传状态机、失败恢复与授权规则见 [B1 实施说明](docs/B1草稿与受控媒体实施说明.md)。运维脚本：`pnpm media:recover`、`pnpm media:cleanup`、`pnpm media:verify <媒体UUID>`。
 
+写作入口是真实编辑器（`/editor/new`、`/editor/:id`）：CodeMirror 6 编辑 Markdown、统一预览（与公开正文共用渲染规则、禁用原始 HTML、链接协议白名单）、图片插入、草稿版本化保存与本地恢复。`POST /api/v1/articles` 幂等创建私有草稿，`GET|PATCH /api/v1/articles/:id/draft` 读取与保存（携带基础版本，旧窗口不能覆盖新文本）。保存节奏与副本隔离见 [B2 实施说明](docs/B2编辑器与本地恢复实施说明.md)。
+
 管理员初始化与测试密码重置使用受限脚本，操作与参数见 [A3 账号与认证说明](docs/A3账号与认证实施说明.md)。不提供默认密码；注册只能创建普通用户。
 
 ## 检查与测试
@@ -50,7 +52,7 @@ pnpm verify:foundation
 pnpm verify:auth
 ```
 
-`check` 生成路由类型后执行类型和规则检查；三个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲，并且需要先停止日常 `pnpm dev`：同一目录下 Next.js 只允许一个开发服务器实例，第二个实例会拒绝启动。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。骨架用例 `tests/e2e/shell.spec.ts` 覆盖游客、成员、封禁与管理员入口，账号 fixtures 在 `tests/fixtures/`；媒体用例在 `tests/foundation/media.spec.ts` 与 `tests/api/media.spec.ts`，图片 fixtures 在 `tests/fixtures/images.ts`。认证测试关闭敏感轨迹与页面快照，预览截图遮罩验证码。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
+`check` 生成路由类型后执行类型和规则检查；三个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲，并且需要先停止日常 `pnpm dev`：同一目录下 Next.js 只允许一个开发服务器实例，第二个实例会拒绝启动。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。骨架用例 `tests/e2e/shell.spec.ts` 覆盖游客、成员、封禁与管理员入口，账号 fixtures 在 `tests/fixtures/`；媒体用例在 `tests/foundation/media.spec.ts` 与 `tests/api/media.spec.ts`，图片 fixtures 在 `tests/fixtures/images.ts`；编辑器用例在 `tests/rules/editor.test.ts`、`tests/api/drafts.spec.ts` 与 `tests/e2e/editor.spec.ts`。认证测试关闭敏感轨迹与页面快照，预览截图遮罩验证码。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
 
 `/api/health/live` 检查 Web 存活；`/api/health/ready` 检查迁移后的基础表和图片目录，失败返回 503。`/api/v1/health` 使用统一的 data/error/requestId 协议。浏览器安装使用 Playwright 锁定版本对应的 Chromium，保存在 `.local/playwright`。
 
@@ -82,6 +84,6 @@ docker tag mirror.gcr.io/library/postgres:17.11-bookworm postgres:17.11-bookworm
 
 ## 项目结构
 
-`src/app` 为页面与接口，`src/config` 为环境校验，`src/infrastructure/db` 为数据库入口，`src/infrastructure/storage` 为受控媒体存储，`src/modules/media` 为媒体服务，`src/worker` 为独立进程，`scripts` 为跨平台工具，`tests` 为规则/接口/浏览器验证与基础 fixtures，`deploy` 为 Linux 容器配置。`prototype` 保留独立静态参考稿。
+`src/app` 为页面与接口，`src/config` 为环境校验，`src/features/editor` 为编辑器与本地恢复，`src/infrastructure/db` 为数据库入口，`src/infrastructure/storage` 为受控媒体存储，`src/modules/media` 与 `src/modules/content` 为媒体与草稿服务，`src/worker` 为独立进程，`scripts` 为跨平台工具，`tests` 为规则/接口/浏览器验证与基础 fixtures，`deploy` 为 Linux 容器配置。`prototype` 保留独立静态参考稿。
 
 版本来源与本机验证记录见 [开发环境说明](docs/开发环境说明.md)。每次完成改动需创建 Git commit。

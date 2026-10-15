@@ -73,3 +73,56 @@
   .account-layout{padding:10px 0 0}.account-layout h1{font-size:27px}.account-card{padding:24px 20px}.account-card dl>div{grid-template-columns:75px 1fr}
 }
 @media(prefers-reduced-motion:no-preference){button,.button{transition:background-color .15s}}
+
+/* 编辑器：标题、Markdown 源码、统一预览、状态与本地恢复 */
+.editor-page{max-width:1200px;margin:0 auto}
+.editor-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.editor-status-group{display:flex;flex-direction:column;gap:3px}
+.editor-status{font-size:13px;font-weight:600;color:var(--muted)}.editor-status[data-state=synced]{color:var(--green)}.editor-status[data-state=unsynced]{color:#8a6d3b}.editor-status[data-state=failed],.editor-status[data-state=conflict]{color:#a54735}
+.editor-backup,.editor-note{font-size:11px;color:var(--muted)}.editor-backup[data-failed=true]{color:#a54735;font-weight:600}
+.editor-actions{display:flex;gap:8px;flex-wrap:wrap}
+.editor-actions button{border:1px solid var(--line);background:white;border-radius:7px;padding:8px 12px;font-size:12px;color:var(--ink)}
+.editor-actions button:hover:not(:disabled){background:var(--soft)}
+.editor-actions button.primary{background:var(--green);border-color:var(--green);color:white}
+.editor-actions button:disabled{opacity:.5;cursor:default}
+.title-input{width:100%;font-size:22px;font-weight:650;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:white;color:var(--ink);margin-bottom:12px}
+.mobile-preview-tabs{display:none;gap:6px;margin-bottom:10px}
+.mobile-preview-tabs button{border:1px solid var(--line);background:white;border-radius:7px;padding:7px 14px;font-size:12px}
+.mobile-preview-tabs button[aria-pressed=true]{background:var(--soft);border-color:#9ec4b0;color:var(--green);font-weight:600}
+.editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.editor-pane{background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}
+.editor-pane-head{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px}
+.editor-pane-head .muted{font-size:11px}
+.editor-source{min-height:420px}
+.editor-source .cm-editor{height:420px;font-size:13px}
+.editor-source .cm-scroller{overflow:auto;font-family:Consolas,"Courier New","Microsoft YaHei",monospace}
+.editor-source .cm-content{padding:12px}
+.editor-source .cm-gutters{background:#f8faf9;border-right:1px solid var(--line);color:#9aa8a0}
+.editor-source .cm-focused{outline:none}
+.editor-source .cm-editor.cm-focused{box-shadow:inset 0 0 0 2px #e2efe8}
+.preview-pane .markdown-body{padding:16px;max-height:520px;overflow:auto}
+.markdown-body{color:var(--ink);font-size:14px;line-height:1.8;overflow-wrap:anywhere}
+.markdown-body h1{font-size:22px}.markdown-body h2{font-size:18px}.markdown-body h3{font-size:16px}
+.markdown-body pre{background:#f6f8f7;padding:12px;border-radius:8px;overflow:auto}
+.markdown-body code{font-family:Consolas,monospace;font-size:12px}
+.markdown-body blockquote{margin:0;padding-left:14px;border-left:3px solid var(--line);color:var(--muted)}
+.markdown-body table{border-collapse:collapse;width:100%;font-size:13px}
+.markdown-body th,.markdown-body td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+.markdown-body img{max-width:100%;border-radius:8px}
+.markdown-body .hljs-comment,.markdown-body .hljs-quote{color:#7d8b84}
+.markdown-body .hljs-keyword,.markdown-body .hljs-selector-tag,.markdown-body .hljs-literal{color:#22775d;font-weight:600}
+.markdown-body .hljs-string,.markdown-body .hljs-attr{color:#a54735}
+.markdown-body .hljs-number,.markdown-body .hljs-built_in{color:#8a6d3b}
+.markdown-body .hljs-title,.markdown-body .hljs-function{color:#1b634d}
+.recovery{margin-top:20px;border:1px solid #f0d8cd;background:#fff8f4;border-radius:12px;padding:18px}
+.recovery h2{font-size:16px;margin:0 0 8px}.recovery p{font-size:12px;margin:0 0 12px}
+.recovery ul{list-style:none;padding:0;margin:0 0 12px;display:grid;gap:8px}
+.recovery li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.recovery button{border:1px solid var(--line);background:white;border-radius:7px;padding:6px 12px;font-size:12px}
+@media(max-width:980px){
+  .editor-grid{grid-template-columns:1fr}
+  .mobile-preview-tabs{display:flex}
+  .editor-grid.pane-edit .preview-pane{display:none}
+  .editor-grid.pane-preview .source-pane{display:none}
+  .editor-source .cm-editor{height:360px}
+}

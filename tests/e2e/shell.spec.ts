@@ -83,11 +83,15 @@ test("A4 / UI-01 member menu lists personal entries and closes by keyboard", asy
   await expect(page).toHaveURL(/\/me\/articles$/);
   await expect(page.getByRole("heading", { name: "内容管理" })).toBeVisible();
 
-  for (const [path, title] of [["/notifications", "通知中心"], ["/me/bookmarks", "我的收藏"], ["/me/reports", "我的举报"], ["/settings/profile", "个人设置"], ["/editor/new", "写下你的下一篇"]] as const) {
+  for (const [path, title] of [["/notifications", "通知中心"], ["/me/bookmarks", "我的收藏"], ["/me/reports", "我的举报"], ["/settings/profile", "个人设置"]] as const) {
     await page.goto(path);
     await expect(page.getByRole("heading", { name: title })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   }
+  // 写作入口在 B2 起是真实编辑器，不再是占位页。
+  await page.goto("/editor/new");
+  await expect(page.getByLabel("文章标题")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
 
   await page.goto("/");
   await openUserMenu(page, trigger);

@@ -13,8 +13,9 @@ export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
   retries: 0,
-  workers: 2,
-  timeout: 60_000,
+  // 开发态按需编译：编辑器页面与接口首次编译较慢，并行加载会互相等待，因此串行执行。
+  workers: 1,
+  timeout: 90_000,
   expect: { timeout: 15_000 },
   reporter: [["list"], ["html", { open: "never", outputFolder: path.join(reportDir, "html") }], ["json", { outputFile: path.join(reportDir, "results.json") }]],
   outputDir: path.join(reportDir, "artifacts"),
