@@ -1,6 +1,7 @@
 name: broker-blog-environment
 
 x-app: &app
+  image: broker-blog-foundation-app
   build:
     context: ..
     dockerfile: deploy/Dockerfile
@@ -14,6 +15,8 @@ x-app: &app
     SESSION_SECRET: ${SESSION_SECRET:?Run pnpm env:setup}
     CAPTCHA_SECRET: ${CAPTCHA_SECRET:?Run pnpm env:setup}
     NEXT_TELEMETRY_DISABLED: "1"
+    TESTED_COMMIT: ${TESTED_COMMIT:-unknown}
+    TESTED_DIRTY: ${TESTED_DIRTY:-unknown}
   volumes:
     - media:/app/.local/media/test
   depends_on:
@@ -21,6 +24,11 @@ x-app: &app
       condition: service_healthy
 
 services:
+  migrate:
+    <<: *app
+    command: ["node", "scripts/run.mjs", "migrate"]
+    restart: "no"
+
   postgres:
     image: postgres:17.11-bookworm
     environment:
@@ -39,6 +47,11 @@ services:
 
   web:
     <<: *app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports: ["127.0.0.1:3000:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -48,7 +61,12 @@ services:
 
   worker:
     <<: *app
-    command: ["pnpm", "worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: ["node", "scripts/run.mjs", "worker"]
     healthcheck:
       test: ["CMD", "node", "-e", "const h=JSON.parse(require('fs').readFileSync('.local/worker-heartbeat.json'));process.exit(h.status==='ready'&&Date.now()-Date.parse(h.updatedAt)<20000?0:1)"]
       interval: 10s
@@ -57,6 +75,7 @@ services:
 
   test:
     <<: *app
+    image: broker-blog-foundation-test
     build:
       context: ..
       dockerfile: deploy/Dockerfile
@@ -65,13 +84,14 @@ services:
       <<: *environment
       PLAYWRIGHT_BASE_URL: http://web:3000
       PLAYWRIGHT_BROWSERS_PATH: /opt/playwright
-    volumes: []
+    volumes:
+      - ../.local/test-runs:/app/.local/test-runs
     depends_on:
       web:
         condition: service_healthy
       worker:
         condition: service_healthy
-    command: ["pnpm", "exec", "playwright", "test"]
+    command: ["pnpm", "verify:foundation"]
 
 volumes:
   postgres:

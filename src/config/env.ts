@@ -8,6 +8,9 @@ const environment = z.object({
   MEDIA_ROOT: z.string().min(1),
   SESSION_SECRET: z.string().min(32),
   CAPTCHA_SECRET: z.string().min(32),
+  DATABASE_SCHEMA: z.string().regex(/^[a-z][a-z0-9_]{0,62}$/).default("public"),
+  TEST_RUN_ID: z.string().regex(/^[a-f0-9]{32}$/).optional(),
+  TEST_CONTROLS: z.enum(["true", "false"]).default("false"),
 });
 
 export function parseEnvironment(input: Record<string, string | undefined>) {
@@ -18,6 +21,12 @@ export function parseEnvironment(input: Record<string, string | undefined>) {
   }
   if ([result.data.SESSION_SECRET, result.data.CAPTCHA_SECRET].some((value) => value.startsWith("REPLACE_"))) {
     throw new Error("Generate local secrets with pnpm env:setup.");
+  }
+  if (result.data.TEST_RUN_ID && (result.data.APP_ENV !== "test" || result.data.DATABASE_SCHEMA !== `bbtest_${result.data.TEST_RUN_ID}`)) {
+    throw new Error("Test run configuration must use its own test schema.");
+  }
+  if (result.data.TEST_CONTROLS === "true" && (result.data.APP_ENV !== "test" || !result.data.TEST_RUN_ID)) {
+    throw new Error("Test controls require an isolated test run.");
   }
   const mediaRoot = path.resolve(result.data.MEDIA_ROOT);
   const relative = path.relative(path.resolve("public"), mediaRoot);

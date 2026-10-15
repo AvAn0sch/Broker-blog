@@ -1,6 +1,6 @@
 # Broker Blog
 
-技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前实现为 A1 开发环境与连接验证入口，业务功能从 A2 起逐项开发。
+技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境和 A2 数据库/事务/任务基础；账号与面向用户的业务流程从 A3 起逐项接入。
 
 ## Windows 开发
 
@@ -13,6 +13,8 @@ pnpm install --frozen-lockfile --offline=false
 pnpm env:setup
 pnpm db:install
 pnpm db:start
+pnpm db:migrate
+pnpm db:seed
 pnpm browser:install
 pnpm db:check
 ```
@@ -28,7 +30,7 @@ pnpm db:start
 pnpm dev
 ```
 
-访问 [本地开发入口](http://127.0.0.1:3000)。另开终端运行 `pnpm worker`，当前 worker 验证数据库连接并更新心跳；持久任务消费在 A2/C4 实现。停止网页和 worker 使用 Ctrl+C；数据库用 `pnpm db:stop` 安全停止，数据保留。
+访问 [本地开发入口](http://127.0.0.1:3000)。另开终端运行 `pnpm worker`，当前 worker 消费持久任务并更新心跳；可以先 `pnpm jobs:probe` 再用 `pnpm worker:once` 验证单轮消费，`pnpm jobs:status` 查询结果。停止网页和 worker 使用 Ctrl+C；数据库用 `pnpm db:stop` 安全停止，数据保留。
 
 ## 检查与测试
 
@@ -38,13 +40,14 @@ pnpm db:check
 pnpm check
 pnpm build
 pnpm verify:environment
+pnpm verify:foundation
 ```
 
-`check` 生成 Next.js 路由类型后执行类型检查和配置规则测试；`verify:environment` 继续运行真实 PostgreSQL 接口检查与桌面/移动 Chromium 冒烟。浏览器测试独立启动 `127.0.0.1:3100`，要求测试库可连接且该端口空闲。接口检查包括真实事务回滚和非超级管理员权限；浏览器检查入口、键盘导航、视口溢出和健康检查跳转。报告在 `playwright-report`、`test-results`，均为本地运行产物。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
+`check` 生成路由类型后执行类型和规则检查；两个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
 
-`/api/health/live` 仅检查 Web 进程存活；`/api/health/ready` 检查数据库和图片目录，失败返回 503，不返回连接凭证。浏览器安装使用 Playwright 锁定版本对应的 Chromium，保存在 `.local/playwright`。
+`/api/health/live` 检查 Web 存活；`/api/health/ready` 检查迁移后的基础表和图片目录，失败返回 503。`/api/v1/health` 使用统一的 data/error/requestId 协议。浏览器安装使用 Playwright 锁定版本对应的 Chromium，保存在 `.local/playwright`。
 
-Drizzle 配置和 `db:generate`、`db:migrate` 入口已准备；业务 schema 与首批版本化迁移属于 A2，当前不需要执行 migrate。禁止用 `push` 或手工改库代替后续迁移。
+首批业务结构和迁移已提交，启动应用前执行 `db:migrate`；它验证历史 hash，拒绝修改过的已应用迁移。后续变更用 `pnpm db:generate --name change_name` 创建新迁移并审查，禁止用 push 或手工改库替代。A2 设计与脚本说明见 [基础设施实施说明](docs/A2基础设施实施说明.md)。
 
 ## Linux 容器验证
 
@@ -57,7 +60,7 @@ pnpm compose:test
 pnpm compose:stop
 ```
 
-镜像在 Linux 内重新安装依赖和构建；Web、worker 使用相同代码，数据库及媒体分别持久化。Compose 的 `test` 服务等待 Web 和 worker 就绪后执行接口及两种视口测试。测试配置使用独立的 `broker_blog_test` 库和非超级管理员角色。`compose:stop` 保留数据；首次初始化脚本只在新数据库卷执行，改密码不会自动更新旧数据库卷。
+镜像在 Linux 内重新安装依赖和构建；迁移服务成功退出后 Web、worker 才能启动。test 服务等待它们就绪后执行规则、接口、持久化和双视口测试，报告写回宿主机 `.local/test-runs`。测试使用 `broker_blog_test` 库和非超级管理员角色。`compose:stop` 保留数据；首次初始化脚本只在新数据库卷执行，改密码不会自动更新旧数据库卷。
 
 若 Docker Hub 网络不可达，可从 [Google 官方公共镜像缓存](https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images) 预取相同固定版本并添加本地标签，然后执行以上命令。本机初始化使用过以下入口：
 
@@ -68,7 +71,7 @@ docker pull mirror.gcr.io/library/postgres:17.11-bookworm
 docker tag mirror.gcr.io/library/postgres:17.11-bookworm postgres:17.11-bookworm
 ```
 
-未来两轮独立全量验收的运行隔离、清理与完整报告由 A2/E 继续实现；当前冒烟通过只证明基础环境可运行，不能替代 MVP 全量 P0 验收。
+运行隔离、清理及报告基础已落地；两轮完整业务验收仍由 E 阶段完成，当前测试不替代 MVP 全量 P0 验收。
 
 ## 项目结构
 

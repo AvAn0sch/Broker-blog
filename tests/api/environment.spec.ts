@@ -7,6 +7,11 @@ test("ENV-01 liveness and database/media readiness", async ({ request }) => {
   expect(response.status()).toBe(200);
   expect(await response.json()).toEqual({ status: "ready", database: "ok", media: "ok" });
   expect(response.headers()["cache-control"]).toBe("no-store");
+  const foundation = await request.get("/api/v1/health");
+  expect(foundation.status()).toBe(200);
+  const body = await foundation.json();
+  expect(body.data).toEqual({ status: "ready" });
+  expect(body.requestId).toBe(foundation.headers()["x-request-id"]);
 });
 
 test("ENV-01 real PostgreSQL transaction rollback and restricted application role", async () => {

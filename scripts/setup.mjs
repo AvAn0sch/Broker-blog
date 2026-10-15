@@ -25,7 +25,7 @@ for (const [file, mode, role, database, port, password] of [
   [".env.local", "development", "broker_app", "broker_blog", 3000, appPassword],
   [".env.test.local", "test", "broker_test", "broker_blog_test", 3100, testPassword],
 ]) {
-  await createOnce(file, `APP_ENV=${mode}\nAPP_ORIGIN=http://127.0.0.1:${port}\nDATABASE_URL=postgresql://${role}:${password}@127.0.0.1:55432/${database}\nMEDIA_ROOT=.local/media/${mode}\nSESSION_SECRET=${secret()}\nCAPTCHA_SECRET=${secret()}\nPG_BIN=.tools/postgresql/pgsql/bin\nPLAYWRIGHT_BROWSERS_PATH=.local/playwright\nNEXT_TELEMETRY_DISABLED=1\n`);
+  await createOnce(file, `APP_ENV=${mode}\nAPP_ORIGIN=http://127.0.0.1:${port}\nDATABASE_URL=postgresql://${role}:${password}@127.0.0.1:55432/${database}\nDATABASE_SCHEMA=public\nMEDIA_ROOT=.local/media/${mode}\nSESSION_SECRET=${secret()}\nCAPTCHA_SECRET=${secret()}\nPG_BIN=.tools/postgresql/pgsql/bin\nPLAYWRIGHT_BROWSERS_PATH=.local/playwright\nNEXT_TELEMETRY_DISABLED=1\n`);
 }
 await createOnce(".local/postgres/admin-password", `${adminPassword}\n`);
 await createOnce(".env.compose.local", `POSTGRES_PASSWORD=${secret()}\nBROKER_APP_PASSWORD=${secret()}\nSESSION_SECRET=${secret()}\nCAPTCHA_SECRET=${secret()}\n`);

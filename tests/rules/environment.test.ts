@@ -27,4 +27,9 @@ describe("ENV-01 configuration boundaries", () => {
   it("rejects a non-PostgreSQL database URL", () => {
     expect(() => parseEnvironment({ ...valid, DATABASE_URL: "https://example.test/private" })).toThrow("DATABASE_URL");
   });
+  it("rejects unsafe schemas and non-test control configuration", () => {
+    expect(() => parseEnvironment({ ...valid, DATABASE_SCHEMA: 'public;drop schema public' })).toThrow("DATABASE_SCHEMA");
+    expect(() => parseEnvironment({ ...valid, APP_ENV: "production", TEST_CONTROLS: "true" })).toThrow("isolated test run");
+    expect(() => parseEnvironment({ ...valid, TEST_RUN_ID: "a".repeat(32), DATABASE_SCHEMA: "public" })).toThrow("own test schema");
+  });
 });
