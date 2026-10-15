@@ -48,7 +48,7 @@ pnpm verify:foundation
 pnpm verify:auth
 ```
 
-`check` 生成路由类型后执行类型和规则检查；三个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。骨架用例 `tests/e2e/shell.spec.ts` 覆盖游客、成员、封禁与管理员入口，账号 fixtures 在 `tests/fixtures/`。认证测试关闭敏感轨迹与页面快照，预览截图遮罩验证码。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
+`check` 生成路由类型后执行类型和规则检查；三个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲，并且需要先停止日常 `pnpm dev`：同一目录下 Next.js 只允许一个开发服务器实例，第二个实例会拒绝启动。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。骨架用例 `tests/e2e/shell.spec.ts` 覆盖游客、成员、封禁与管理员入口，账号 fixtures 在 `tests/fixtures/`。认证测试关闭敏感轨迹与页面快照，预览截图遮罩验证码。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
 
 `/api/health/live` 检查 Web 存活；`/api/health/ready` 检查迁移后的基础表和图片目录，失败返回 503。`/api/v1/health` 使用统一的 data/error/requestId 协议。浏览器安装使用 Playwright 锁定版本对应的 Chromium，保存在 `.local/playwright`。
 

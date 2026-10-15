@@ -97,6 +97,29 @@ test("A4 / UI-01 member menu lists personal entries and closes by keyboard", asy
   await expect(page.getByRole("button", { name: /用户菜单/ })).toHaveCount(0);
 });
 
+test("A4 / UI-01 root attributes injected before hydration do not break the shell", async ({ page }) => {
+  const hydrationErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error" && message.text().includes("hydrated but some attributes")) hydrationErrors.push(message.text());
+  });
+  // 模拟浏览器扩展：在文档开始时监听，<html> 一出现就注入外部属性，
+  // 保证水合比较必然遇到客户端渲染不存在的属性。
+  await page.addInitScript(() => {
+    const stamp = () => {
+      const element = document.documentElement;
+      if (element && !element.hasAttribute("data-extension-simulation-uid")) element.setAttribute("data-extension-simulation-uid", "injected");
+    };
+    stamp();
+    new MutationObserver(stamp).observe(document, { childList: true, subtree: true });
+  });
+  await registerThroughUi(page, { nickname: "扩展成员", password });
+  const trigger = page.getByRole("button", { name: /用户菜单（扩展成员）/ });
+  await openUserMenu(page, trigger);
+  await expect(page.getByRole("navigation", { name: "用户相关页面" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.getAttribute("data-extension-simulation-uid"))).toBe("injected");
+  expect(hydrationErrors).toEqual([]);
+});
+
 test("A4 / AUTH-02 admin and banned states change the visible entries and gates", async ({ page }) => {
   const email = await registerThroughUi(page, { nickname: "状态成员", password });
   const trigger = page.getByRole("button", { name: /用户菜单（状态成员）/ });
