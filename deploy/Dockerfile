@@ -15,6 +15,7 @@ RUN node -e "const fs=require('node:fs');fs.mkdirSync('/etc/ssl/certs',{recursiv
     && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && pnpm exec playwright install --with-deps chromium
 COPY . .
+COPY --from=build /app/.next ./.next
 CMD ["pnpm", "verify:foundation"]
 
 FROM build AS runtime

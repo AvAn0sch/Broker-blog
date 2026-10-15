@@ -28,6 +28,10 @@ export function parseEnvironment(input: Record<string, string | undefined>) {
   if (result.data.TEST_CONTROLS === "true" && (result.data.APP_ENV !== "test" || !result.data.TEST_RUN_ID)) {
     throw new Error("Test controls require an isolated test run.");
   }
+  const origin = new URL(result.data.APP_ORIGIN);
+  if (!["http:", "https:"].includes(origin.protocol) || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash || (result.data.APP_ENV === "production" && origin.protocol !== "https:")) {
+    throw new Error("APP_ORIGIN must be a plain HTTP(S) origin; production requires HTTPS.");
+  }
   const mediaRoot = path.resolve(result.data.MEDIA_ROOT);
   const relative = path.relative(path.resolve("public"), mediaRoot);
   if (relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))) {

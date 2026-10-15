@@ -21,7 +21,7 @@ export const captchaChallenges = pgTable("captcha_challenges", {
   id: id(), browserBindingHash: varchar("browser_binding_hash", { length: 64 }).notNull(), purpose: text("purpose").notNull(), answerHmac: varchar("answer_hmac", { length: 64 }).notNull(),
   attempts: integer("attempts").notNull().default(0), expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   consumedAt: timestamp("consumed_at", { withTimezone: true }), invalidatedAt: timestamp("invalidated_at", { withTimezone: true }), createdAt: createdAt(),
-}, (t) => [check("captcha_purpose_check", sql`${t.purpose} in ('register','login')`), check("captcha_attempts_check", sql`${t.attempts} between 0 and 5`), index("captcha_expiry_idx").on(t.expiresAt)]);
+}, (t) => [check("captcha_purpose_check", sql`${t.purpose} in ('register','login')`), check("captcha_attempts_check", sql`${t.attempts} between 0 and 5`), index("captcha_expiry_idx").on(t.expiresAt), uniqueIndex("captcha_one_active_browser_purpose").on(t.browserBindingHash, t.purpose).where(sql`${t.consumedAt} is null and ${t.invalidatedAt} is null`)]);
 
 export const rateLimitBuckets = pgTable("rate_limit_buckets", {
   action: varchar("action", { length: 64 }).notNull(), subjectHash: varchar("subject_hash", { length: 64 }).notNull(), windowStart: timestamp("window_start", { withTimezone: true }).notNull(), count: integer("count").notNull().default(0),

@@ -82,7 +82,7 @@ services:
       target: test
     environment:
       <<: *environment
-      PLAYWRIGHT_BASE_URL: http://web:3000
+      PLAYWRIGHT_SERVER_MODE: production
       PLAYWRIGHT_BROWSERS_PATH: /opt/playwright
     volumes:
       - ../.local/test-runs:/app/.local/test-runs

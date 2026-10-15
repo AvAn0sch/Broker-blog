@@ -1,6 +1,6 @@
 # Broker Blog
 
-技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境和 A2 数据库/事务/任务基础；账号与面向用户的业务流程从 A3 起逐项接入。
+技术社区 MVP。产品范围见 [产品设计](docs/MVP产品设计文档.md)，实施结构见 [系统架构](docs/系统架构设计.md)，任务安排见 [开发规划](docs/开发规划.md)。当前已实现 A1 环境、A2 数据库/事务/任务基础与 A3 账号认证；下一步是 A4 页面导航与角色入口。
 
 ## Windows 开发
 
@@ -30,7 +30,11 @@ pnpm db:start
 pnpm dev
 ```
 
-访问 [本地开发入口](http://127.0.0.1:3000)。另开终端运行 `pnpm worker`，当前 worker 消费持久任务并更新心跳；可以先 `pnpm jobs:probe` 再用 `pnpm worker:once` 验证单轮消费，`pnpm jobs:status` 查询结果。停止网页和 worker 使用 Ctrl+C；数据库用 `pnpm db:stop` 安全停止，数据保留。
+访问 [本地开发入口](http://127.0.0.1:3000)、[注册](http://127.0.0.1:3000/register)或[登录](http://127.0.0.1:3000/login)。请使用配置中的 `127.0.0.1`，不要混用 `localhost`，因为写请求校验精确 Origin。开发服务器显式采用 Webpack，避免本机 Turbopack 开发监听导致反复重载；生产构建仍使用 Turbopack。
+
+另开终端运行 `pnpm worker`，当前 worker 消费持久任务并更新心跳；可以先 `pnpm jobs:probe` 再用 `pnpm worker:once` 验证单轮消费，`pnpm jobs:status` 查询结果。停止网页和 worker 使用 Ctrl+C；数据库用 `pnpm db:stop` 安全停止，数据保留。
+
+管理员初始化与测试密码重置使用受限脚本，操作与参数见 [A3 账号与认证说明](docs/A3账号与认证实施说明.md)。不提供默认密码；注册只能创建普通用户。
 
 ## 检查与测试
 
@@ -41,9 +45,10 @@ pnpm check
 pnpm build
 pnpm verify:environment
 pnpm verify:foundation
+pnpm verify:auth
 ```
 
-`check` 生成路由类型后执行类型和规则检查；两个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
+`check` 生成路由类型后执行类型和规则检查；三个 verify 入口均执行当前完整回归。测试自动在测试数据库创建独立命名空间、应用迁移，结束后清理本轮数据和媒体。浏览器独立启动 `127.0.0.1:3100`，要求端口空闲。报告在 `.local/test-runs/<运行标识>/reports/`，保留用例结果、commit 和清理状态。认证测试关闭敏感轨迹与页面快照，预览截图遮罩验证码。`next-env.d.ts` 按框架要求自动生成并忽略，Next.js 自动维护的 AGENTS.md 指引随项目保留。
 
 `/api/health/live` 检查 Web 存活；`/api/health/ready` 检查迁移后的基础表和图片目录，失败返回 503。`/api/v1/health` 使用统一的 data/error/requestId 协议。浏览器安装使用 Playwright 锁定版本对应的 Chromium，保存在 `.local/playwright`。
 
@@ -60,7 +65,7 @@ pnpm compose:test
 pnpm compose:stop
 ```
 
-镜像在 Linux 内重新安装依赖和构建；迁移服务成功退出后 Web、worker 才能启动。test 服务等待它们就绪后执行规则、接口、持久化和双视口测试，报告写回宿主机 `.local/test-runs`。测试使用 `broker_blog_test` 库和非超级管理员角色。`compose:stop` 保留数据；首次初始化脚本只在新数据库卷执行，改密码不会自动更新旧数据库卷。
+镜像在 Linux 内重新安装依赖和构建；迁移服务成功退出后 Web、worker 才能启动。test 服务等待它们就绪，再为本轮 schema 启动独立生产应用，执行规则、接口、持久化和双视口测试，报告写回宿主机 `.local/test-runs`。测试使用 `broker_blog_test` 库和非超级管理员角色，拒绝外部测试地址。`compose:stop` 保留数据；首次初始化脚本只在新数据库卷执行，改密码不会自动更新旧数据库卷。
 
 若 Docker Hub 网络不可达，可从 [Google 官方公共镜像缓存](https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images) 预取相同固定版本并添加本地标签，然后执行以上命令。本机初始化使用过以下入口：
 

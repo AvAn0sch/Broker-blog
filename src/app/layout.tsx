@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Broker Blog · 开发环境",
-  description: "Broker Blog 本地开发环境入口",
+  title: "Broker Blog · 记录实践，与同行连接",
+  description: "记录技术思考，分享实践经验，与同行一起探索。",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

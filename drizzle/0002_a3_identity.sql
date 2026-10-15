@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "captcha_one_active_browser_purpose" ON "captcha_challenges" USING btree ("browser_binding_hash","purpose") WHERE "captcha_challenges"."consumed_at" is null and "captcha_challenges"."invalidated_at" is null;

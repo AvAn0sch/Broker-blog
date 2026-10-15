@@ -10,5 +10,5 @@ try {
       await client.query("INSERT INTO tags (slug,name) VALUES ($1,$2) ON CONFLICT (slug) DO NOTHING", [slug, name]);
     }
   });
-  console.log("Preset tags initialized; existing data was preserved. Account fixtures arrive with A3 authentication.");
+  console.log("Preset tags initialized; existing data was preserved. Use the restricted account scripts for synthetic accounts.");
 } finally { await pool.end(); }

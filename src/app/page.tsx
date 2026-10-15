@@ -1,12 +1,14 @@
+import { SiteHeader } from "@/components/site-header";
+
 export default function Home() {
   return (
-    <main>
-      <a className="brand" href="/">b<span>·</span> broker blog</a>
-      <p className="eyebrow">开发环境 · A1</p>
-      <h1>从这里，开始构建。</h1>
-      <p>项目基础已启动。接下来将逐步接入账号、文章创作与社区互动。</p>
-      <a className="button" href="/api/health/ready">检查服务连接 →</a>
-      <p className="note">当前页面用于确认开发环境，业务功能正在后续阶段实现。</p>
-    </main>
+    <><SiteHeader /><main className="home-layout">
+      <p className="eyebrow">记录 · 实践 · 连接</p>
+      <h1>把经验写下来，<br />让思考走得更远。</h1>
+      <p>与你一样热爱技术的人，分享每一次探索。</p>
+      <a className="button" href="/register">开启我的技术旅程 →</a>
+      <p className="note">文章创作与社区互动即将开放。</p>
+      <a className="health-link" href="/api/health/ready">检查服务连接 →</a>
+    </main></>
   );
 }

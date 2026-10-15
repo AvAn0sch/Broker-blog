@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import type { Pool } from "pg";
 import { createPool } from "../../src/infrastructure/db/client";
@@ -38,7 +39,8 @@ function gate() { let release!: () => void; const wait = new Promise<void>((reso
 test("ENV-01 migrations are repeatable and foreign keys stay inside the run", async () => {
   await migrateDatabase(pool, process.env.DATABASE_SCHEMA);
   const migrations = await pool.query("SELECT count(*)::int AS count FROM __drizzle_migrations");
-  expect(migrations.rows[0].count).toBe(2);
+  const journal = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8"));
+  expect(migrations.rows[0].count).toBe(journal.entries.length);
   const foreignKeys = await pool.query(`SELECT count(*)::int AS count FROM pg_constraint c JOIN pg_class child ON child.oid=c.conrelid JOIN pg_namespace a ON a.oid=child.relnamespace JOIN pg_class parent ON parent.oid=c.confrelid JOIN pg_namespace b ON b.oid=parent.relnamespace WHERE c.contype='f' AND a.nspname=$1 AND b.nspname<>$1`, [process.env.DATABASE_SCHEMA]);
   expect(foreignKeys.rows[0].count).toBe(0);
   const original = (await pool.query("SELECT id,hash FROM __drizzle_migrations ORDER BY id LIMIT 1")).rows[0];

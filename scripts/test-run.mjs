@@ -17,7 +17,7 @@ const run = await createTestRun(connectionString);
 const reports = path.join(run.directory, "reports");
 await mkdir(reports, { recursive: true });
 const environment = { ...process.env, APP_ENV: "test", TEST_RUN_ID: run.id, DATABASE_SCHEMA: run.schema, TEST_CONTROLS: "true", MEDIA_ROOT: run.media, TEST_REPORT_DIR: reports };
-// An external server has its own namespace; foundation tests still use this run's pool.
+// The application, internal captcha adapter and every worker inherit this run's namespace.
 const started = new Date().toISOString();
 console.log(`Test run: ${run.id}`);
 let code = 1;
@@ -37,7 +37,7 @@ try {
   let result = {};
   try { result = JSON.parse(await readFile(path.join(reports, "results.json"), "utf8")).stats; } catch {}
   if (!result || !result.expected || result.skipped || result.unexpected || result.flaky) code = 1;
-  const summary = { runId: run.id, commit, dirty, started, ended: new Date().toISOString(), node: process.version, configurationVersion: "a2-v1", datasetVersion: "foundation-v1", browser: "chromium-1248 / 156.0.8078.4", result, exitCode: code, cleanup };
+  const summary = { runId: run.id, commit, dirty, started, ended: new Date().toISOString(), node: process.version, configurationVersion: "a3-v1", datasetVersion: "identity-v1", browser: "chromium-1248 / 156.0.8078.4", result, exitCode: code, cleanup };
   await writeFile(path.join(reports, "summary.json"), JSON.stringify(summary, null, 2));
   await writeFile(path.join(reports, "summary.md"), `# Foundation run ${run.id}\n\nCommit: ${commit}\n\nDirty: ${dirty}\n\nExit code: ${code}\n\nCleanup: ${cleanup}\n\nResults: ${JSON.stringify(result)}\n`);
   console.log(`Report: ${path.join(reports, "summary.json")} (cleanup: ${cleanup})`);
